@@ -42,6 +42,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         Backend.init(applicationContext)
+        com.syemape.radio.data.Prefs.init(applicationContext)
         SessionManager.bootstrap()
         enableEdgeToEdge()
         setContent {
@@ -58,7 +59,9 @@ private fun AppRoot() {
     val bottomInset = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
     val scope = rememberCoroutineScope()
 
-    var tab by remember { mutableStateOf(Tab.Mapa) }
+    var tab by remember {
+        mutableStateOf(com.syemape.radio.data.Prefs.lastTab?.let { runCatching { Tab.valueOf(it) }.getOrNull() } ?: Tab.Mapa)
+    }
     var loading by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var openChat by remember { mutableStateOf<Pair<String, String>?>(null) }
@@ -147,7 +150,7 @@ private fun AppRoot() {
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
                         .padding(bottom = if (bottomInset > 0.dp) bottomInset + 8.dp else 16.dp),
-                    onSelect = { tab = it },
+                    onSelect = { tab = it; com.syemape.radio.data.Prefs.lastTab = it.name },
                 )
             }
           }

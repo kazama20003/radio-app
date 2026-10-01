@@ -124,13 +124,18 @@ object RadioManager {
         ui.launch {
             val list = runCatching { Backend.api.radioChannels() }.getOrNull().orEmpty()
             channels = list
-            val ch = list.firstOrNull { it.joined } ?: list.firstOrNull() ?: return@launch
+            speakerOn = Prefs.speakerOn
+            val saved = Prefs.lastChannelId
+            val ch = list.firstOrNull { it.id == saved }
+                ?: list.firstOrNull { it.joined }
+                ?: list.firstOrNull() ?: return@launch
             channelId = ch.id
             channelName = listOfNotNull(ch.name, ch.description).joinToString(" · ").ifBlank { "Canal" }
             members = ch.memberCount
             socket.emit("channel:join", ch.id)
             connected = true
             registerAudioCallback()
+            requestAudioFocus()
             applyAudioRoute()
             RadioService.start(app, channelName)
             // Watchdog: el sistema resetea el modo de audio y baja el volumen;
@@ -155,6 +160,7 @@ object RadioManager {
         val prev = channelId
         // UI instantánea (en el hilo que llama, normalmente Main)
         channelId = id
+        Prefs.lastChannelId = id
         channels.firstOrNull { it.id == id }?.let { ch ->
             channelName = listOfNotNull(ch.name, ch.description).joinToString(" · ").ifBlank { "Canal" }
             members = ch.memberCount
@@ -292,6 +298,7 @@ object RadioManager {
 
     fun toggleSpeaker() {
         speakerOn = !speakerOn
+        Prefs.speakerOn = speakerOn
         applyAudioRoute()
     }
 
@@ -345,6 +352,37 @@ object RadioManager {
         }
     }
 
+    private var focusRequest: android.media.AudioFocusRequest? = null
+
+    /** Toma el foco de audio para que otras apps no bajen el volumen de la radio. */
+    private fun requestAudioFocus() {
+        val am = sysAudio ?: return
+        if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.O) return
+        if (focusRequest != null) return
+        runCatching {
+            val attrs = android.media.AudioAttributes.Builder()
+                .setUsage(android.media.AudioAttributes.USAGE_VOICE_COMMUNICATION)
+                .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SPEECH)
+                .build()
+            val req = android.media.AudioFocusRequest.Builder(android.media.AudioManager.AUDIOFOCUS_GAIN)
+                .setAudioAttributes(attrs)
+                .setWillPauseWhenDucked(false)
+                .build()
+            focusRequest = req
+            am.requestAudioFocus(req)
+        }
+    }
+
+    private fun abandonAudioFocus() {
+        val am = sysAudio ?: return
+        runCatching {
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                focusRequest?.let { am.abandonAudioFocusRequest(it) }
+            }
+        }
+        focusRequest = null
+    }
+
     /**
      * Re-asienta modo de comunicación y volumen de llamada SIN re-seleccionar el
      * dispositivo (evita glitches). El sistema resetea el modo a NORMAL entre
@@ -369,6 +407,7 @@ object RadioManager {
             runCatching { device?.dispose() }; device = null
             channelId?.let { socket.emit("channel:leave", it) }
             socket.off("ms:newProducer"); socket.off("ms:producerClosed"); socket.off("connect")
+            abandonAudioFocus()
             runCatching {
                 audioCallback?.let { sysAudio?.unregisterAudioDeviceCallback(it) }; audioCallback = null
                 if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) sysAudio?.clearCommunicationDevice()
