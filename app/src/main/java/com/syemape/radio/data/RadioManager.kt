@@ -25,6 +25,7 @@ import io.socket.emitter.Emitter
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.json.JSONObject
 import org.webrtc.PeerConnectionFactory
@@ -132,6 +133,14 @@ object RadioManager {
             registerAudioCallback()
             applyAudioRoute()
             RadioService.start(app, channelName)
+            // Watchdog: el sistema resetea el modo de audio y baja el volumen;
+            // lo re-asentamos periódicamente mientras la radio está activa.
+            ui.launch {
+                while (started) {
+                    delay(2000)
+                    if (connected) keepAudioAlive()
+                }
+            }
             // LENTO: WebRTC + mediasoup en segundo plano
             worker.execute {
                 runCatching { initWebrtc(app) }.onFailure { return@execute }
@@ -244,6 +253,9 @@ object RadioManager {
         )
         consumers[consumer.id] = consumer
         ack("ms:resume", JSONObject().put("consumerId", consumer.id))
+        // Re-aserta la ruta y el volumen de llamada: evita que el audio baje
+        // de volumen tras la primera transmisión (Android degrada la ruta al idle).
+        applyAudioRoute()
         ui.launch { remoteSpeaking = true; speakerLabel = speaker }
     }
 
@@ -324,6 +336,27 @@ object RadioManager {
                 @Suppress("DEPRECATION")
                 am.isSpeakerphoneOn = speakerOn
             }
+            // WebRTC reproduce por STREAM_VOICE_CALL en MODE_IN_COMMUNICATION:
+            // mantenlo al máximo para que el audio no baje de volumen con el tiempo.
+            runCatching {
+                val stream = AudioManager.STREAM_VOICE_CALL
+                am.setStreamVolume(stream, am.getStreamMaxVolume(stream), 0)
+            }
+        }
+    }
+
+    /**
+     * Re-asienta modo de comunicación y volumen de llamada SIN re-seleccionar el
+     * dispositivo (evita glitches). El sistema resetea el modo a NORMAL entre
+     * transmisiones y eso baja el volumen; este watchdog lo mantiene.
+     */
+    private fun keepAudioAlive() {
+        val am = sysAudio ?: return
+        runCatching {
+            if (am.mode != AudioManager.MODE_IN_COMMUNICATION) am.mode = AudioManager.MODE_IN_COMMUNICATION
+            val stream = AudioManager.STREAM_VOICE_CALL
+            val max = am.getStreamMaxVolume(stream)
+            if (am.getStreamVolume(stream) < max) am.setStreamVolume(stream, max, 0)
         }
     }
 
