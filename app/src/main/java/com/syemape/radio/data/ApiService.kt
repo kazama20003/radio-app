@@ -1,0 +1,79 @@
+package com.syemape.radio.data
+
+import retrofit2.http.Body
+import retrofit2.http.GET
+import retrofit2.http.PATCH
+import retrofit2.http.POST
+import retrofit2.http.Path
+
+/** Interfaz Retrofit del backend Mape (REST bajo /api). */
+interface ApiService {
+    @POST("auth/login")
+    suspend fun login(@Body body: LoginRequest): Session
+
+    @POST("auth/refresh")
+    suspend fun refresh(@Body body: RefreshRequest): Session
+
+    @POST("auth/logout")
+    suspend fun logout()
+
+    @GET("users/me")
+    suspend fun me(): AuthUser
+
+    @retrofit2.http.PATCH("users/me")
+    suspend fun updateProfile(@Body body: UpdateProfileRequest): AuthUser
+
+    @GET("users")
+    suspend fun users(): List<AuthUser>
+
+    @GET("settings")
+    suspend fun settings(): AppSetting
+
+    @retrofit2.http.PATCH("settings")
+    suspend fun updateSettings(@Body body: Map<String, @JvmSuppressWildcards Any?>): AppSetting
+
+    @GET("notifications/preferences")
+    suspend fun notifPrefs(): NotificationPref
+
+    @retrofit2.http.PATCH("notifications/preferences")
+    suspend fun updateNotifPrefs(@Body body: Map<String, @JvmSuppressWildcards Any?>): NotificationPref
+
+    @GET("units/summary")
+    suspend fun unitsSummary(): UnitsSummary
+
+    @GET("tracking/live")
+    suspend fun liveUnits(): List<LiveUnit>
+
+    @GET("tracking/people")
+    suspend fun livePeople(): List<LivePerson>
+
+    @POST("tracking/me/position")
+    suspend fun reportMyPosition(@Body body: ReportPositionRequest): LivePerson
+
+    @GET("alerts")
+    suspend fun alerts(): List<Alert>
+
+    @GET("alerts/metrics")
+    suspend fun alertMetrics(): AlertMetrics
+
+    @PATCH("alerts/read-all")
+    suspend fun markAlertsRead()
+
+    @GET("radio/channels")
+    suspend fun radioChannels(): List<RadioChannel>
+
+    @GET("radio/channels/{id}/history")
+    suspend fun radioHistory(@Path("id") id: String, @retrofit2.http.Query("limit") limit: Int = 50): List<RadioTransmission>
+
+    @GET("conversations")
+    suspend fun conversations(): List<Conversation>
+
+    @GET("conversations/{id}")
+    suspend fun conversation(@Path("id") id: String): ConversationDetail
+
+    @POST("conversations/{id}/messages")
+    suspend fun sendMessage(@Path("id") id: String, @Body body: SendMessageRequest): Message
+
+    @POST("conversations/{id}/read")
+    suspend fun markRead(@Path("id") id: String)
+}
