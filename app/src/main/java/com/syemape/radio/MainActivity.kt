@@ -149,7 +149,11 @@ private fun AppRoot() {
                 when (tab) {
                     Tab.Mapa -> MapScreen(topInset)
                     Tab.Radio -> RadioScreen(topInset, bottomInset, onOpenChannelChat = { id, name -> openChannelChat = id to name })
-                    Tab.Chats -> ChatsScreen(topInset, onOpenChat = { id, name -> openChat = id to name })
+                    Tab.Chats -> ChatsScreen(
+                        topInset,
+                        onOpenChat = { id, name -> openChat = id to name },
+                        onOpenChannelChat = { id, name -> openChannelChat = id to name },
+                    )
                     Tab.Alertas -> AlertsScreen(topInset, onGoMap = { tab = Tab.Mapa }, onGoRadio = { tab = Tab.Radio })
                     Tab.Perfil -> ProfileScreen(
                         topInset,

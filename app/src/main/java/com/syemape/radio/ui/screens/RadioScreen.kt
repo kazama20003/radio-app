@@ -41,7 +41,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.platform.LocalContext
@@ -173,18 +172,8 @@ fun RadioScreen(topPadding: Dp, bottomPadding: Dp = 0.dp, onOpenChannelChat: (St
 
         Spacer(Modifier.height(14.dp))
 
-        // ---- Controles: Último · HABLAR · Chat ----
-        Row(
-            Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            ControlSquare(MapeIcons.Prev, enabled = false) { }
-            HoldTalkButton(Modifier.weight(1f))
-            ControlSquare(MapeIcons.Chat, enabled = RadioManager.channelId != null) {
-                RadioManager.channelId?.let { onOpenChannelChat(it, RadioManager.channelName) }
-            }
-        }
+        // ---- Control: HABLAR (push-to-talk) ----
+        HoldTalkButton(Modifier.fillMaxWidth())
     }
 }
 
@@ -227,15 +216,6 @@ private fun RowScope.OutputPill(label: String, selected: Boolean, onClick: () ->
             fontFamily = Outfit, fontWeight = FontWeight.SemiBold, fontSize = 13.sp, maxLines = 1,
         )
     }
-}
-
-@Composable
-private fun ControlSquare(icon: ImageVector, enabled: Boolean, onClick: () -> Unit) {
-    val alpha = if (enabled) 1f else 0.35f
-    Box(
-        Modifier.size(96.dp).clip(RoundedCornerShape(28.dp)).background(MapeColors.Bg).pressScale(enabled = enabled) { onClick() },
-        contentAlignment = Alignment.Center,
-    ) { Icon(icon, null, tint = MapeColors.Ink.copy(alpha = alpha), modifier = Modifier.size(26.dp)) }
 }
 
 /**

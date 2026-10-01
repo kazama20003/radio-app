@@ -68,10 +68,17 @@ private fun Conversation.toDisplay(meId: String?): ChatDisplay {
 }
 
 @Composable
-fun ChatsScreen(topPadding: Dp, onOpenChat: (String, String) -> Unit = { _, _ -> }) {
+fun ChatsScreen(
+    topPadding: Dp,
+    onOpenChat: (String, String) -> Unit = { _, _ -> },
+    onOpenChannelChat: (String, String) -> Unit = { _, _ -> },
+) {
     val meId = SessionManager.user?.id
     val result by rememberAsync { Backend.api.conversations() }
     val convos = result?.getOrNull().orEmpty().map { it.toDisplay(meId) }
+    // Canales de radio: se muestran como chats aparte (diferenciados) arriba de todo.
+    val channelsResult by rememberAsync { Backend.api.radioChannels() }
+    val channels = channelsResult?.getOrNull().orEmpty()
 
     LazyColumn(
         modifier = Modifier.fillMaxSize().background(MapeColors.Bg),
@@ -98,6 +105,44 @@ fun ChatsScreen(topPadding: Dp, onOpenChat: (String, String) -> Unit = { _, _ ->
                 Text("Buscar chat", color = Color8A, fontFamily = Outfit, fontSize = 14.sp)
             }
             Spacer(Modifier.height(10.dp))
+        }
+        if (channels.isNotEmpty()) {
+            item {
+                Text(
+                    "CANALES DE RADIO",
+                    color = MapeColors.TextMuted, fontFamily = Outfit, fontWeight = FontWeight.SemiBold,
+                    fontSize = 12.sp, letterSpacing = 0.6.sp,
+                )
+            }
+            items(channels) { ch ->
+                val chName = ch.name ?: "Canal"
+                val chTitle = listOfNotNull(ch.name, ch.description).joinToString(" · ").ifBlank { "Canal" }
+                Row(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(22.dp)).background(MapeColors.White)
+                        .pressScale { onOpenChannelChat(ch.id, chTitle) }
+                        .padding(horizontal = 14.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Box(Modifier.size(48.dp).clip(CircleShape).background(MapeColors.Ink), contentAlignment = Alignment.Center) {
+                        Icon(MapeIcons.Radio, null, tint = MapeColors.White, modifier = Modifier.size(24.dp))
+                    }
+                    Spacer(Modifier.width(12.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(chName, color = MapeColors.Ink, fontFamily = Outfit, fontWeight = FontWeight.SemiBold, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Spacer(Modifier.height(3.dp))
+                        Text("Canal de radio · ${ch.memberCount} en el canal", color = MapeColors.Red, fontFamily = Outfit, fontWeight = FontWeight.Medium, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                    Icon(MapeIcons.ChevronRight, null, tint = MapeColors.TextFaint, modifier = Modifier.size(20.dp))
+                }
+            }
+            item {
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    "MENSAJES",
+                    color = MapeColors.TextMuted, fontFamily = Outfit, fontWeight = FontWeight.SemiBold,
+                    fontSize = 12.sp, letterSpacing = 0.6.sp,
+                )
+            }
         }
         if (result == null) {
             item { Box(Modifier.fillMaxWidth().padding(top = 40.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator(color = MapeColors.Ink) } }
