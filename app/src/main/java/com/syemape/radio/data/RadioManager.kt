@@ -27,6 +27,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import org.json.JSONArray
 import org.json.JSONObject
 import org.webrtc.PeerConnectionFactory
 import java.util.concurrent.CountDownLatch
@@ -49,6 +51,7 @@ object RadioManager {
     var txFailed by mutableStateOf(false); private set
     var channels by mutableStateOf<List<RadioChannel>>(emptyList()); private set
     var normalDeviceLabel by mutableStateOf("Teléfono"); private set
+    var audioLevel by mutableStateOf(0f); private set        // nivel de voz 0..1 (mueve la onda)
 
     private val ui = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val worker = Executors.newSingleThreadExecutor()
@@ -147,6 +150,7 @@ object RadioManager {
                     if (connected) keepAudioAlive()
                 }
             }
+            startLevelLoop()
             // LENTO: WebRTC + mediasoup en segundo plano
             worker.execute {
                 runCatching { initWebrtc(app) }.onFailure { return@execute }
@@ -323,6 +327,54 @@ object RadioManager {
         applyAudioRoute()
     }
 
+    /** Fija la salida: altavoz (true) o el dispositivo "normal" (false). */
+    fun setSpeaker(on: Boolean) {
+        if (speakerOn == on) return
+        speakerOn = on
+        Prefs.speakerOn = on
+        applyAudioRoute()
+    }
+
+    @Volatile private var levelPolling = false
+
+    /**
+     * Sondea el nivel de audio real (WebRTC getStats → "audioLevel") ~cada 120 ms
+     * mientras hay voz, y lo suaviza para alimentar la onda del sintonizador.
+     */
+    private fun startLevelLoop() {
+        if (levelPolling) return
+        levelPolling = true
+        ui.launch {
+            while (started) {
+                val raw = when {
+                    talking -> withContext(Dispatchers.IO) { runCatching { parseAudioLevel(producer?.stats) }.getOrNull() }
+                    remoteSpeaking -> withContext(Dispatchers.IO) { runCatching { parseAudioLevel(consumers.values.firstOrNull()?.stats) }.getOrNull() }
+                    else -> 0f
+                } ?: 0f
+                // audioLevel de WebRTC es RMS (voz ≈ 0..0.3): lo amplificamos y suavizamos.
+                val target = (raw * 3.4f).coerceIn(0f, 1f)
+                audioLevel += (target - audioLevel) * 0.45f
+                delay(120)
+            }
+            audioLevel = 0f
+            levelPolling = false
+        }
+    }
+
+    /** Extrae el mayor "audioLevel" (0..1) del RTCStatsReport JSON de WebRTC. */
+    private fun parseAudioLevel(statsJson: String?): Float? {
+        if (statsJson.isNullOrBlank()) return null
+        return runCatching {
+            val arr = JSONArray(statsJson)
+            var level = -1.0
+            for (i in 0 until arr.length()) {
+                val o = arr.optJSONObject(i) ?: continue
+                if (o.has("audioLevel")) level = maxOf(level, o.optDouble("audioLevel", 0.0))
+            }
+            if (level < 0) null else level.toFloat()
+        }.getOrNull()
+    }
+
     private var audioCallback: android.media.AudioDeviceCallback? = null
 
     private fun registerAudioCallback() {
@@ -437,7 +489,7 @@ object RadioManager {
             RadioService.stop(appRef)
             setupDone = false
             started = false
-            ui.launch { connected = false; talking = false; remoteSpeaking = false; speakerLabel = null }
+            ui.launch { connected = false; talking = false; remoteSpeaking = false; speakerLabel = null; audioLevel = 0f }
         }
     }
 

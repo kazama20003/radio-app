@@ -39,6 +39,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.syemape.radio.BuildConfig
 import com.syemape.radio.data.Backend
 import com.syemape.radio.data.Fmt
 import com.syemape.radio.data.RadioTransmission
@@ -59,6 +60,17 @@ private fun RadioTransmission.preview(): String = when {
     else -> ""
 }
 
+/** Origen del backend (sin /api) para construir URLs de archivos servidos. */
+private val mediaOrigin: String = BuildConfig.API_BASE_URL.substringBefore("/api")
+
+/** URL completa de una nota de voz a partir de su key (`/uploads/...`). */
+private fun audioUrlOf(key: String?): String? = when {
+    key.isNullOrBlank() -> null
+    key.startsWith("http") -> key
+    key.startsWith("/") -> mediaOrigin + key
+    else -> null
+}
+
 @Composable
 fun ChannelChatScreen(channelId: String, title: String, topPadding: Dp, bottomPadding: Dp, onBack: () -> Unit) {
     val meId = SessionManager.user?.id
@@ -66,6 +78,33 @@ fun ChannelChatScreen(channelId: String, title: String, topPadding: Dp, bottomPa
     val items = remember { mutableStateListOf<RadioTransmission>() }
     var draft by remember { mutableStateOf("") }
     val listState = rememberLazyListState()
+
+    // Reproductor de notas de voz (uno compartido; playingId = burbuja sonando).
+    val player = remember { android.media.MediaPlayer() }
+    var playingId by remember { mutableStateOf<String?>(null) }
+    DisposableEffect(Unit) { onDispose { runCatching { player.release() } } }
+    fun toggleVoice(t: RadioTransmission) {
+        val url = audioUrlOf(t.audioKey) ?: return
+        if (playingId == t.id) { // ya sonando esta → pausar/detener
+            runCatching { player.stop() }
+            playingId = null
+            return
+        }
+        runCatching {
+            player.reset()
+            player.setAudioAttributes(
+                android.media.AudioAttributes.Builder()
+                    .setUsage(android.media.AudioAttributes.USAGE_MEDIA)
+                    .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SPEECH)
+                    .build()
+            )
+            player.setDataSource(url)
+            player.setOnPreparedListener { it.start(); playingId = t.id }
+            player.setOnCompletionListener { playingId = null }
+            player.setOnErrorListener { _, _, _ -> playingId = null; true }
+            player.prepareAsync()
+        }.onFailure { playingId = null }
+    }
 
     LaunchedEffect(channelId) {
         // El historial viene del más nuevo al más viejo: lo invertimos (orden cronológico).
@@ -126,7 +165,33 @@ fun ChannelChatScreen(channelId: String, title: String, topPadding: Dp, bottomPa
                             Text(t.sender?.nickname ?: t.sender?.name ?: "—", color = MapeColors.Red, fontFamily = Outfit, fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
                             Spacer(Modifier.height(2.dp))
                         }
-                        Text(t.preview(), color = if (mine) MapeColors.White else MapeColors.Ink, fontFamily = Outfit, fontSize = 15.sp)
+                        if (t.audioKey != null) {
+                            val playing = playingId == t.id
+                            Row(
+                                Modifier.pressScale { toggleVoice(t) },
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            ) {
+                                Box(
+                                    Modifier.size(34.dp).clip(CircleShape).background(if (mine) MapeColors.White else MapeColors.Ink),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Icon(
+                                        if (playing) MapeIcons.Pause else MapeIcons.Play,
+                                        null,
+                                        tint = if (mine) MapeColors.Ink else MapeColors.White,
+                                        modifier = Modifier.size(16.dp),
+                                    )
+                                }
+                                Text(
+                                    "Nota de voz" + (t.durationSec?.let { " · ${it.toInt()}s" } ?: ""),
+                                    color = if (mine) MapeColors.White else MapeColors.Ink,
+                                    fontFamily = Outfit, fontWeight = FontWeight.Medium, fontSize = 15.sp,
+                                )
+                            }
+                        } else {
+                            Text(t.preview(), color = if (mine) MapeColors.White else MapeColors.Ink, fontFamily = Outfit, fontSize = 15.sp)
+                        }
                         Text(Fmt.shortTime(t.createdAt), color = if (mine) MapeColors.TextOnDark else MapeColors.TextFaint, fontFamily = Outfit, fontSize = 10.sp, modifier = Modifier.padding(top = 3.dp).align(Alignment.End))
                     }
                 }

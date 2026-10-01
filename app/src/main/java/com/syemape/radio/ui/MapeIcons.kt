@@ -114,6 +114,7 @@ object MapeIcons {
     )
     val Clock = buildIcon(1.8f, Part(circlePath(12f, 12f, 8f)), Part("M12 8v4l3 2"))
     val Play = buildIcon(2f, Part("M8 5v14l11-7z", fill = true))
+    val Pause = buildIcon(2f, Part(rrectPath(6f, 5f, 4f, 14f, 1f), fill = true), Part(rrectPath(14f, 5f, 4f, 14f, 1f), fill = true))
     val Truck = buildIcon(
         1.8f,
         Part("M3 7h11v9H3zM14 10h4l3 3v3h-7z"),

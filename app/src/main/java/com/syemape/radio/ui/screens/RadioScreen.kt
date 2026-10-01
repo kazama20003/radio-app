@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -130,6 +131,7 @@ fun RadioScreen(topPadding: Dp, bottomPadding: Dp = 0.dp, onOpenChannelChat: (St
         // ---- Onda de audio animada (estilo dial) con indicador rojo ----
         TunerRuler(
             active = RadioManager.talking || RadioManager.remoteSpeaking,
+            level = RadioManager.audioLevel,
             modifier = Modifier.fillMaxWidth().height(72.dp),
         )
 
@@ -148,17 +150,25 @@ fun RadioScreen(topPadding: Dp, bottomPadding: Dp = 0.dp, onOpenChannelChat: (St
 
         Spacer(Modifier.weight(1f))
 
-        // ---- Volumen + salida ----
+        // ---- Salida de audio (selector): dispositivo normal vs altavoz ----
+        Row(
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(26.dp)).background(MapeColors.Bg).padding(5.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            OutputPill(RadioManager.normalDeviceLabel, selected = !RadioManager.speakerOn) { RadioManager.setSpeaker(false) }
+            OutputPill("Altavoz", selected = RadioManager.speakerOn) { RadioManager.setSpeaker(true) }
+        }
+
+        Spacer(Modifier.height(10.dp))
+
+        // ---- Volumen ----
         Row(
             Modifier.fillMaxWidth().clip(RoundedCornerShape(26.dp)).background(MapeColors.Bg).padding(horizontal = 16.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Box(Modifier.pressScale { RadioManager.toggleSpeaker() }) {
-                Icon(MapeIcons.Speaker, null, tint = if (RadioManager.speakerOn) MapeColors.Ink else MapeColors.TextFaint, modifier = Modifier.size(20.dp))
-            }
+            Icon(MapeIcons.Speaker, null, tint = MapeColors.Ink, modifier = Modifier.size(20.dp))
             VolumeSlider(0.8f, Modifier.weight(1f))
-            Text(if (RadioManager.speakerOn) "Altavoz" else RadioManager.normalDeviceLabel, color = MapeColors.TextMuted, fontFamily = Outfit, fontWeight = FontWeight.Medium, fontSize = 12.sp)
         }
 
         Spacer(Modifier.height(14.dp))
@@ -201,6 +211,24 @@ private fun HoldTalkButton(modifier: Modifier) {
     }
 }
 
+/** Pastilla de selección de salida de audio; se resalta la activa (dispositivo en uso). */
+@Composable
+private fun RowScope.OutputPill(label: String, selected: Boolean, onClick: () -> Unit) {
+    Box(
+        Modifier.weight(1f).clip(RoundedCornerShape(22.dp))
+            .background(if (selected) MapeColors.Ink else Color.Transparent)
+            .pressScale { onClick() }
+            .padding(vertical = 11.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            label,
+            color = if (selected) MapeColors.White else MapeColors.TextMuted,
+            fontFamily = Outfit, fontWeight = FontWeight.SemiBold, fontSize = 13.sp, maxLines = 1,
+        )
+    }
+}
+
 @Composable
 private fun ControlSquare(icon: ImageVector, enabled: Boolean, onClick: () -> Unit) {
     val alpha = if (enabled) 1f else 0.35f
@@ -216,7 +244,7 @@ private fun ControlSquare(icon: ImageVector, enabled: Boolean, onClick: () -> Un
  * amplitud cuando alguien transmite.
  */
 @Composable
-private fun TunerRuler(active: Boolean, modifier: Modifier) {
+private fun TunerRuler(active: Boolean, level: Float, modifier: Modifier) {
     val tickColor = MapeColors.Border
     val tickActive = MapeColors.Ink.copy(alpha = 0.55f)
     val red = MapeColors.Red
@@ -230,12 +258,13 @@ private fun TunerRuler(active: Boolean, modifier: Modifier) {
         ),
         label = "phase",
     )
+    // La amplitud sigue el volumen real de la voz: más fuerte = onda más alta.
+    val amp = if (active) (0.3f + 1.25f * level).coerceIn(0.22f, 1.3f) else 0.45f
     Canvas(modifier) {
         val w = size.width
         val h = size.height
         val n = 52
         val gap = w / n
-        val amp = if (active) 1f else 0.45f
         for (i in 0..n) {
             val x = i * gap
             val t = i.toFloat() / n
