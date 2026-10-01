@@ -271,8 +271,21 @@ object RadioManager {
         ui.launch { remoteSpeaking = false; speakerLabel = null }
     }
 
+    /** Pitido corto tipo walkie-talkie (inicio/fin de transmisión). */
+    private fun beep(tone: Int, durationMs: Int) {
+        worker.execute {
+            runCatching {
+                val tg = android.media.ToneGenerator(AudioManager.STREAM_VOICE_CALL, 90)
+                tg.startTone(tone, durationMs)
+                Thread.sleep((durationMs + 60).toLong())
+                tg.release()
+            }
+        }
+    }
+
     fun startTalking() {
         if (remoteSpeaking) return
+        beep(android.media.ToneGenerator.TONE_PROP_BEEP, 150) // pitido de inicio
         worker.execute {
             val send = sendTransport ?: return@execute
             val track = audioManager?.track ?: return@execute
@@ -288,6 +301,7 @@ object RadioManager {
     }
 
     fun stopTalking() {
+        beep(android.media.ToneGenerator.TONE_PROP_BEEP2, 120) // pitido "roger" al soltar
         worker.execute {
             runCatching { producer?.close() }
             producer = null

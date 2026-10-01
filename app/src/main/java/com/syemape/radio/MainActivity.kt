@@ -95,15 +95,27 @@ private fun AppRoot() {
         AuthStatus.Authenticated -> {
           val context = androidx.compose.ui.platform.LocalContext.current
           val permLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
-              androidx.activity.result.contract.ActivityResultContracts.RequestPermission()
-          ) { granted -> if (granted) com.syemape.radio.data.TrackingManager.startLocationUpdates(context) }
+              androidx.activity.result.contract.ActivityResultContracts.RequestMultiplePermissions()
+          ) { result ->
+              if (result[android.Manifest.permission.ACCESS_FINE_LOCATION] == true) {
+                  com.syemape.radio.data.TrackingManager.startLocationUpdates(context)
+              }
+          }
           androidx.compose.runtime.LaunchedEffect(Unit) {
               com.syemape.radio.data.TrackingManager.start(context)
               com.syemape.radio.data.AppBadges.wireRealtime()
               com.syemape.radio.data.AppBadges.refresh()
-              if (!com.syemape.radio.data.TrackingManager.hasLocationPermission(context)) {
-                  permLauncher.launch(android.Manifest.permission.ACCESS_FINE_LOCATION)
+              // Pide TODOS los permisos de una sola vez al entrar.
+              val wanted = buildList {
+                  add(android.Manifest.permission.RECORD_AUDIO)
+                  add(android.Manifest.permission.ACCESS_FINE_LOCATION)
+                  if (android.os.Build.VERSION.SDK_INT >= 33) add(android.Manifest.permission.POST_NOTIFICATIONS)
+                  if (android.os.Build.VERSION.SDK_INT >= 31) add(android.Manifest.permission.BLUETOOTH_CONNECT)
               }
+              val missing = wanted.filter {
+                  context.checkSelfPermission(it) != android.content.pm.PackageManager.PERMISSION_GRANTED
+              }
+              if (missing.isNotEmpty()) permLauncher.launch(missing.toTypedArray())
           }
           Box(Modifier.fillMaxSize().background(MapeColors.Bg)) {
             val chat = openChat
@@ -136,7 +148,7 @@ private fun AppRoot() {
             } else {
                 when (tab) {
                     Tab.Mapa -> MapScreen(topInset)
-                    Tab.Radio -> RadioScreen(topInset, onOpenChannelChat = { id, name -> openChannelChat = id to name })
+                    Tab.Radio -> RadioScreen(topInset, bottomInset, onOpenChannelChat = { id, name -> openChannelChat = id to name })
                     Tab.Chats -> ChatsScreen(topInset, onOpenChat = { id, name -> openChat = id to name })
                     Tab.Alertas -> AlertsScreen(topInset, onGoMap = { tab = Tab.Mapa }, onGoRadio = { tab = Tab.Radio })
                     Tab.Perfil -> ProfileScreen(

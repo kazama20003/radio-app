@@ -55,7 +55,7 @@ import com.syemape.radio.ui.theme.MapeColors
 import com.syemape.radio.ui.theme.Outfit
 
 @Composable
-fun RadioScreen(topPadding: Dp, onOpenChannelChat: (String, String) -> Unit = { _, _ -> }) {
+fun RadioScreen(topPadding: Dp, bottomPadding: Dp = 0.dp, onOpenChannelChat: (String, String) -> Unit = { _, _ -> }) {
     val context = LocalContext.current
     val app = context.applicationContext as android.app.Application
     val micLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
@@ -69,7 +69,7 @@ fun RadioScreen(topPadding: Dp, onOpenChannelChat: (String, String) -> Unit = { 
     var favorite by remember { mutableStateOf(false) }
 
     Column(
-        Modifier.fillMaxSize().background(MapeColors.White).padding(top = topPadding + 14.dp, start = 24.dp, end = 24.dp, bottom = 108.dp),
+        Modifier.fillMaxSize().background(MapeColors.White).padding(top = topPadding + 14.dp, start = 24.dp, end = 24.dp, bottom = bottomPadding + 96.dp),
     ) {
         // ---- Barra superior: radio + canales (tipo FM/AM) ----
         Row(
@@ -180,10 +180,10 @@ fun RadioScreen(topPadding: Dp, onOpenChannelChat: (String, String) -> Unit = { 
 
 @Composable
 private fun HoldTalkButton(modifier: Modifier) {
-    Row(
+    Column(
         modifier
-            .height(76.dp)
-            .clip(RoundedCornerShape(24.dp))
+            .height(96.dp)
+            .clip(RoundedCornerShape(28.dp))
             .background(if (RadioManager.talking) MapeColors.Red else MapeColors.Ink)
             .pointerInput(Unit) {
                 detectTapGestures(onPress = {
@@ -192,12 +192,12 @@ private fun HoldTalkButton(modifier: Modifier) {
                     RadioManager.stopTalking()
                 })
             },
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.Center,
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Icon(MapeIcons.Mic, null, tint = MapeColors.White, modifier = Modifier.size(26.dp))
-        Spacer(Modifier.width(10.dp))
-        Text(if (RadioManager.talking) "CORTAR" else "HABLAR", color = MapeColors.White, fontFamily = Outfit, fontWeight = FontWeight.Bold, fontSize = 17.sp, letterSpacing = 1.2.sp)
+        Icon(MapeIcons.Mic, null, tint = MapeColors.White, modifier = Modifier.size(40.dp))
+        Spacer(Modifier.height(4.dp))
+        Text(if (RadioManager.talking) "CORTAR" else "HABLAR", color = MapeColors.White, fontFamily = Outfit, fontWeight = FontWeight.Bold, fontSize = 15.sp, letterSpacing = 1.2.sp)
     }
 }
 
@@ -205,9 +205,9 @@ private fun HoldTalkButton(modifier: Modifier) {
 private fun ControlSquare(icon: ImageVector, enabled: Boolean, onClick: () -> Unit) {
     val alpha = if (enabled) 1f else 0.35f
     Box(
-        Modifier.size(76.dp).clip(RoundedCornerShape(24.dp)).background(MapeColors.Bg).pressScale(enabled = enabled) { onClick() },
+        Modifier.size(96.dp).clip(RoundedCornerShape(28.dp)).background(MapeColors.Bg).pressScale(enabled = enabled) { onClick() },
         contentAlignment = Alignment.Center,
-    ) { Icon(icon, null, tint = MapeColors.Ink.copy(alpha = alpha), modifier = Modifier.size(24.dp)) }
+    ) { Icon(icon, null, tint = MapeColors.Ink.copy(alpha = alpha), modifier = Modifier.size(26.dp)) }
 }
 
 /**

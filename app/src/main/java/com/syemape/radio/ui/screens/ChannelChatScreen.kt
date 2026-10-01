@@ -68,24 +68,31 @@ fun ChannelChatScreen(channelId: String, title: String, topPadding: Dp, bottomPa
     val listState = rememberLazyListState()
 
     LaunchedEffect(channelId) {
-        runCatching { Backend.api.radioHistory(channelId) }.getOrNull()?.let { items.clear(); items.addAll(it) }
+        // El historial viene del más nuevo al más viejo: lo invertimos (orden cronológico).
+        runCatching { Backend.api.radioHistory(channelId) }.getOrNull()?.let {
+            items.clear(); items.addAll(it.reversed())
+            if (items.isNotEmpty()) listState.scrollToItem(items.size - 1) // ir al último
+        }
     }
     LaunchedEffect(items.size) { if (items.isNotEmpty()) listState.animateScrollToItem(items.size - 1) }
 
     DisposableEffect(channelId) {
         val socket = Realtime.socket("/radio")
-        // Asegura estar en la sala del canal para recibir channel:post en vivo.
+        // Asegura estar en la sala del canal para recibir eventos en vivo.
         if (!socket.connected()) socket.connect()
         socket.emit("channel:join", channelId)
-        val listener = io.socket.emitter.Emitter.Listener { args ->
+        // Añade una transmisión (texto/imagen vía channel:post, o nota de voz vía ptt:ended).
+        val addFromEvent = io.socket.emitter.Emitter.Listener { args ->
             val o = args.firstOrNull() as? JSONObject ?: return@Listener
             if (o.optString("channelId") != channelId) return@Listener
+            if (!o.has("transmission")) return@Listener // ptt:ended sin grabación: ignorar
             val t = runCatching { Realtime.gson.fromJson(o.getJSONObject("transmission").toString(), RadioTransmission::class.java) }.getOrNull()
                 ?: return@Listener
             scope.launch(Dispatchers.Main) { if (items.none { it.id == t.id }) items.add(t) }
         }
-        socket.on("channel:post", listener)
-        onDispose { socket.off("channel:post", listener) }
+        socket.on("channel:post", addFromEvent) // texto / imagen
+        socket.on("ptt:ended", addFromEvent)    // nota de voz grabada
+        onDispose { socket.off("channel:post", addFromEvent); socket.off("ptt:ended", addFromEvent) }
     }
 
     Column(Modifier.fillMaxSize().background(MapeColors.Bg)) {

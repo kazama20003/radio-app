@@ -22,6 +22,7 @@ class RadioService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_STOP) {
+            runCatching { com.syemape.radio.data.RadioManager.stop() } // corta socket + audio
             releaseWakeLock()
             stopForegroundCompat()
             stopSelf()
@@ -107,15 +108,22 @@ class RadioService : Service() {
             val logo = runCatching {
                 android.graphics.BitmapFactory.decodeResource(context.resources, com.syemape.radio.R.drawable.app_logo)
             }.getOrNull()
+            val stopIntent = Intent(context, RadioService::class.java).setAction(ACTION_STOP)
+            val stopPi = android.app.PendingIntent.getService(
+                context, 1, stopIntent,
+                android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE,
+            )
             return NotificationCompat.Builder(context, CHANNEL_ID)
                 .setSmallIcon(android.R.drawable.ic_btn_speak_now)
                 .apply { if (logo != null) setLargeIcon(logo) }
-                .setContentTitle("Radio Mape activa")
-                .setContentText("Conectado a $channelText")
+                .setContentTitle(channelText)
+                .setContentText("Radio en vivo · tu equipo te escucha")
                 .setOngoing(true)
                 .setSilent(true)
+                .setShowWhen(false)
                 .setPriority(NotificationCompat.PRIORITY_LOW)
                 .setContentIntent(pi)
+                .addAction(0, "Desconectar", stopPi)
                 .build()
         }
 
