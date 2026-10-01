@@ -87,6 +87,7 @@ object RadioManager {
         val f = comp.createPeerConnectionFactory(app) { _, _ -> }
         val am = comp.createAudioManager()
         am?.initTrack(f, opt)
+        runCatching { am?.enabled = false } // micro apagado hasta transmitir (half-duplex)
         factory = f; audioManager = am; constraints = opt
         initialized = true
     }
@@ -289,6 +290,7 @@ object RadioManager {
         worker.execute {
             val send = sendTransport ?: return@execute
             val track = audioManager?.track ?: return@execute
+            runCatching { audioManager?.enabled = true } // activa el micrófono
             try {
                 producer = send.produce(object : Producer.Listener {
                     override fun onTransportClose(producer: Producer) {}
@@ -305,6 +307,7 @@ object RadioManager {
         worker.execute {
             runCatching { producer?.close() }
             producer = null
+            runCatching { audioManager?.enabled = false } // silencia el micrófono
             socket.emit("ms:closeProducer")
             ui.launch { talking = false }
         }
