@@ -286,30 +286,34 @@ object RadioManager {
 
     fun startTalking() {
         if (remoteSpeaking) return
+        // Feedback instantáneo (sin esperar al handshake de produce): UI + micro + pitido.
+        talking = true
+        txFailed = false
+        runCatching { audioManager?.enabled = true } // activa el micrófono ya
         beep(android.media.ToneGenerator.TONE_PROP_BEEP, 150) // pitido de inicio
         worker.execute {
-            val send = sendTransport ?: return@execute
+            val send = sendTransport ?: run { ui.launch { talking = false; txFailed = true }; return@execute }
             val track = audioManager?.track ?: return@execute
-            runCatching { audioManager?.enabled = true } // activa el micrófono
             try {
                 producer = send.produce(object : Producer.Listener {
                     override fun onTransportClose(producer: Producer) {}
                 }, track)
-                ui.launch { talking = true; txFailed = false }
             } catch (e: Exception) {
-                ui.launch { txFailed = true }
+                ui.launch { talking = false; txFailed = true }
+                runCatching { audioManager?.enabled = false }
             }
         }
     }
 
     fun stopTalking() {
+        if (!talking) return
+        talking = false // instantáneo
+        runCatching { audioManager?.enabled = false } // silencia el micrófono ya
         beep(android.media.ToneGenerator.TONE_PROP_BEEP2, 120) // pitido "roger" al soltar
         worker.execute {
             runCatching { producer?.close() }
             producer = null
-            runCatching { audioManager?.enabled = false } // silencia el micrófono
             socket.emit("ms:closeProducer")
-            ui.launch { talking = false }
         }
     }
 
