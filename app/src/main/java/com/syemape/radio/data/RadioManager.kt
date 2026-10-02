@@ -97,6 +97,8 @@ object RadioManager {
     }
 
     @Volatile private var started = false
+    @Volatile private var audioSessionActive = false // true SOLO mientras hay voz (foco + modo llamada)
+    @Volatile private var consuming = false           // recibiendo voz de alguien
 
     /** Arranca la radio: entra al canal rápido y prepara WebRTC/mediasoup en 2º plano. */
     fun start(app: Application) {
@@ -152,11 +154,10 @@ object RadioManager {
             socket.emit("channel:join", ch.id)
             connected = true
             registerAudioCallback()
-            requestAudioFocus()
-            applyAudioRoute()
             RadioService.start(app, channelName)
-            // Watchdog: el sistema resetea el modo de audio y baja el volumen;
-            // lo re-asentamos periódicamente mientras la radio está activa.
+            // Watchdog: mientras HAY voz activa, re-asienta modo/volumen que el
+            // sistema puede resetear. En silencio no tocamos el audio del sistema
+            // (así otras apps conservan su micrófono y su sonido).
             ui.launch {
                 while (started) {
                     delay(2000)
@@ -284,15 +285,17 @@ object RadioManager {
         )
         consumers[consumer.id] = consumer
         ack("ms:resume", JSONObject().put("consumerId", consumer.id))
-        // Re-aserta la ruta y el volumen de llamada: evita que el audio baje
-        // de volumen tras la primera transmisión (Android degrada la ruta al idle).
-        applyAudioRoute()
+        // Toma el audio del sistema (foco + modo llamada + ruta) para reproducir la voz.
+        consuming = true
+        acquireAudioSession()
         ui.launch { remoteSpeaking = true; speakerLabel = speaker }
     }
 
     private fun closeConsumers() {
         consumers.values.forEach { runCatching { it.close() } }
         consumers.clear()
+        consuming = false
+        releaseAudioSession() // dejé de recibir: libera el audio si tampoco estoy hablando
         ui.launch { remoteSpeaking = false; speakerLabel = null }
     }
 
@@ -313,6 +316,7 @@ object RadioManager {
         // Feedback instantáneo (sin esperar al handshake de produce): UI + micro + pitido.
         talking = true
         txFailed = false
+        acquireAudioSession() // toma el audio del sistema solo ahora que voy a hablar
         runCatching { audioManager?.enabled = true } // activa el micrófono ya
         beep(android.media.ToneGenerator.TONE_PROP_BEEP, 150) // pitido de inicio
         worker.execute {
@@ -345,13 +349,14 @@ object RadioManager {
             runCatching { producer?.close() }
             producer = null
             socket.emit("ms:closeProducer")
+            releaseAudioSession() // terminé de hablar: libera el audio a otras apps
         }
     }
 
     fun toggleSpeaker() {
         speakerOn = !speakerOn
         Prefs.speakerOn = speakerOn
-        applyAudioRoute()
+        if (audioSessionActive) applyAudioRoute() // solo si hay voz; si no, basta con guardar la preferencia
     }
 
     /** Fija la salida: altavoz (true) o el dispositivo "normal" (false). */
@@ -359,7 +364,7 @@ object RadioManager {
         if (speakerOn == on) return
         speakerOn = on
         Prefs.speakerOn = on
-        applyAudioRoute()
+        if (audioSessionActive) applyAudioRoute()
     }
 
     /** Fija el volumen de la radio (0..1) sobre STREAM_VOICE_CALL. */
@@ -428,8 +433,8 @@ object RadioManager {
         val am = sysAudio ?: return
         if (audioCallback != null) return
         val cb = object : android.media.AudioDeviceCallback() {
-            override fun onAudioDevicesAdded(addedDevices: Array<out android.media.AudioDeviceInfo>?) = applyAudioRoute()
-            override fun onAudioDevicesRemoved(removedDevices: Array<out android.media.AudioDeviceInfo>?) = applyAudioRoute()
+            override fun onAudioDevicesAdded(addedDevices: Array<out android.media.AudioDeviceInfo>?) { if (audioSessionActive) applyAudioRoute() }
+            override fun onAudioDevicesRemoved(removedDevices: Array<out android.media.AudioDeviceInfo>?) { if (audioSessionActive) applyAudioRoute() }
         }
         audioCallback = cb
         runCatching { am.registerAudioDeviceCallback(cb, null) }
@@ -481,7 +486,8 @@ object RadioManager {
                 .setUsage(android.media.AudioAttributes.USAGE_VOICE_COMMUNICATION)
                 .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SPEECH)
                 .build()
-            val req = android.media.AudioFocusRequest.Builder(android.media.AudioManager.AUDIOFOCUS_GAIN)
+            // TRANSIENT: al soltar el foco, otras apps (música, etc.) pueden reanudar.
+            val req = android.media.AudioFocusRequest.Builder(android.media.AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)
                 .setAudioAttributes(attrs)
                 .setWillPauseWhenDucked(false)
                 .build()
@@ -501,11 +507,37 @@ object RadioManager {
     }
 
     /**
+     * Toma el audio del sistema (foco + modo llamada + ruta) SOLO mientras hay voz
+     * (al hablar o al recibir). Así, en silencio, el micrófono y el sonido quedan
+     * libres para otras apps.
+     */
+    private fun acquireAudioSession() {
+        if (audioSessionActive) { applyAudioRoute(); return }
+        audioSessionActive = true
+        requestAudioFocus()
+        applyAudioRoute() // MODE_IN_COMMUNICATION + ruta + volumen
+    }
+
+    /** Libera el audio del sistema cuando ya no hay voz (ni hablo ni recibo). */
+    private fun releaseAudioSession() {
+        if (talking || consuming) return // sigue habiendo voz
+        if (!audioSessionActive) return
+        audioSessionActive = false
+        abandonAudioFocus()
+        val am = sysAudio ?: return
+        runCatching {
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) am.clearCommunicationDevice()
+            am.mode = AudioManager.MODE_NORMAL
+        }
+    }
+
+    /**
      * Re-asienta modo de comunicación y volumen de llamada SIN re-seleccionar el
      * dispositivo (evita glitches). El sistema resetea el modo a NORMAL entre
      * transmisiones y eso baja el volumen; este watchdog lo mantiene.
      */
     private fun keepAudioAlive() {
+        if (!audioSessionActive) return // en silencio no tocamos el audio del sistema
         val am = sysAudio ?: return
         runCatching {
             if (am.mode != AudioManager.MODE_IN_COMMUNICATION) am.mode = AudioManager.MODE_IN_COMMUNICATION
@@ -534,6 +566,8 @@ object RadioManager {
             RadioService.stop(appRef)
             setupDone = false
             started = false
+            audioSessionActive = false
+            consuming = false
             ui.launch { connected = false; talking = false; remoteSpeaking = false; speakerLabel = null; audioLevel = 0f }
         }
     }
