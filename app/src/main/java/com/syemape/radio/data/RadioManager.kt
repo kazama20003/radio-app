@@ -105,6 +105,12 @@ object RadioManager {
     @Volatile private var audioSessionActive = false // true SOLO mientras hay voz (foco + modo llamada)
     @Volatile private var consuming = false           // recibiendo voz de alguien
 
+    /** Mi propio usuario como MiniUser (para mostrarme conectado al instante). */
+    private fun meUser(): MiniUser? {
+        val u = SessionManager.user ?: return null
+        return MiniUser(id = u.id, name = u.name, nickname = u.nickname)
+    }
+
     /** Arranca la radio: entra al canal rápido y prepara WebRTC/mediasoup en 2º plano. */
     fun start(app: Application) {
         if (started) return // ya corriendo (sigue vivo entre pestañas / en 2º plano)
@@ -164,10 +170,11 @@ object RadioManager {
                 ?: list.firstOrNull() ?: return@launch
             channelId = ch.id
             channelName = listOfNotNull(ch.name, ch.description).joinToString(" · ").ifBlank { "Canal" }
-            // NO sembramos con memberCount (miembros persistentes): el nº de conectados
-            // en vivo llega por channel:presence. Así no se muestra "4" en todos los canales.
-            members = 0
-            connectedUsers = emptyList()
+            // Me muestro a MÍ al instante (ya estoy en el canal); la presencia en vivo
+            // (channel:presence) completa la lista real. Evita el "0 conectados" inicial.
+            val me = meUser()
+            connectedUsers = me?.let { listOf(it) } ?: emptyList()
+            members = if (me != null) 1 else 0
             socket.emit("channel:join", ch.id)
             connected = true
             registerAudioCallback()
@@ -200,8 +207,10 @@ object RadioManager {
         Prefs.lastChannelId = id
         channels.firstOrNull { it.id == id }?.let { ch ->
             channelName = listOfNotNull(ch.name, ch.description).joinToString(" · ").ifBlank { "Canal" }
-            members = 0 // conectados reales llegan por channel:presence del canal nuevo
-            connectedUsers = emptyList() // se repuebla con el channel:presence del canal nuevo
+            // Yo, al instante; la presencia del canal nuevo completa el resto.
+            val me = meUser()
+            connectedUsers = me?.let { listOf(it) } ?: emptyList()
+            members = if (me != null) 1 else 0
         }
         talking = false; remoteSpeaking = false; speakerLabel = null; txFailed = false
         RadioService.update(appRef, channelName)
