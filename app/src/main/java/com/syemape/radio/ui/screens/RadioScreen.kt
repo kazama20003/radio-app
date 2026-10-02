@@ -50,7 +50,10 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.syemape.radio.data.RadioManager
+import com.syemape.radio.ui.Avatar
 import com.syemape.radio.ui.MapeIcons
+import com.syemape.radio.ui.avatarColor
+import com.syemape.radio.ui.initialsOf
 import com.syemape.radio.ui.pressScale
 import com.syemape.radio.ui.theme.MapeColors
 import com.syemape.radio.ui.theme.Outfit
@@ -110,6 +113,26 @@ fun RadioScreen(topPadding: Dp, bottomPadding: Dp = 0.dp, onOpenChannelChat: (St
                 "${RadioManager.members} conectados · ${if (RadioManager.connected) "En vivo" else "Conectando…"}",
                 color = MapeColors.TextMuted, fontFamily = Outfit, fontSize = 15.sp,
             )
+        }
+        // Quiénes están conectados en vivo (nombre/alias). Vacío si aún no llega presencia.
+        if (RadioManager.connectedUsers.isNotEmpty()) {
+            Spacer(Modifier.height(12.dp))
+            Row(
+                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                RadioManager.connectedUsers.forEach { u ->
+                    val label = u.nickname ?: u.name ?: "—"
+                    Row(
+                        Modifier.clip(CircleShape).background(MapeColors.Bg).padding(start = 5.dp, end = 14.dp, top = 5.dp, bottom = 5.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Avatar(initialsOf(label), avatarColor(u.id.ifBlank { label }), size = 30.dp)
+                        Text(label, color = MapeColors.Ink, fontFamily = Outfit, fontWeight = FontWeight.Medium, fontSize = 13.sp, maxLines = 1)
+                    }
+                }
+            }
         }
 
         Spacer(Modifier.height(22.dp))

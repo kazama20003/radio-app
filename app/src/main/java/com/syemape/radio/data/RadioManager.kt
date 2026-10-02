@@ -44,6 +44,7 @@ object RadioManager {
     var connected by mutableStateOf(false); private set
     var channelName by mutableStateOf("Canal"); private set
     var members by mutableIntStateOf(0); private set
+    var connectedUsers by mutableStateOf<List<MiniUser>>(emptyList()); private set // quién está en vivo
     var talking by mutableStateOf(false); private set        // yo estoy transmitiendo
     var remoteSpeaking by mutableStateOf(false); private set // alguien habla
     var speakerLabel by mutableStateOf<String?>(null); private set // alias de quien habla
@@ -84,7 +85,9 @@ object RadioManager {
             enableAudioUpstream()
             audioProcessingEchoCancellation = true
             audioProcessingNoiseSuppression = true
-            audioProcessingAutoGainControl = true
+            // AGC desactivado: el control automático de ganancia "forzaba" el volumen,
+            // amplificando el ruido y saturando la voz. Sin él la voz suena natural.
+            audioProcessingAutoGainControl = false
             audioCodec = MediaConstraintsOption.AudioCodec.OPUS
         }
         val comp = RTCComponentFactory(opt)
@@ -112,7 +115,17 @@ object RadioManager {
             val o = args.firstOrNull() as? JSONObject ?: return@Listener
             if (o.optString("channelId") == channelId) {
                 val count = o.optInt("count", members)
-                ui.launch { members = count }
+                val arr = o.optJSONArray("users")
+                val list = if (arr != null) (0 until arr.length()).mapNotNull { i ->
+                    arr.optJSONObject(i)?.let {
+                        MiniUser(
+                            id = it.optString("id"),
+                            name = it.optString("name").takeIf { s -> s.isNotBlank() },
+                            nickname = it.optString("nickname").takeIf { s -> s.isNotBlank() },
+                        )
+                    }
+                } else null
+                ui.launch { members = count; if (list != null) connectedUsers = list }
             }
         })
         socket.on("ms:newProducer", Emitter.Listener { args ->
@@ -183,6 +196,7 @@ object RadioManager {
         channels.firstOrNull { it.id == id }?.let { ch ->
             channelName = listOfNotNull(ch.name, ch.description).joinToString(" · ").ifBlank { "Canal" }
             members = ch.memberCount
+            connectedUsers = emptyList() // se repuebla con el channel:presence del canal nuevo
         }
         talking = false; remoteSpeaking = false; speakerLabel = null; txFailed = false
         RadioService.update(appRef, channelName)
@@ -571,7 +585,7 @@ object RadioManager {
             started = false
             audioSessionActive = false
             consuming = false
-            ui.launch { connected = false; talking = false; remoteSpeaking = false; speakerLabel = null; audioLevel = 0f }
+            ui.launch { connected = false; talking = false; remoteSpeaking = false; speakerLabel = null; audioLevel = 0f; connectedUsers = emptyList() }
         }
     }
 
