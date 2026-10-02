@@ -84,10 +84,12 @@ object RadioManager {
             enableAudioDownstream()
             enableAudioUpstream()
             audioProcessingEchoCancellation = true
+            // Supresión de ruido fuerte: quita el ruido de fondo/externo para que
+            // el AGC no lo amplifique y solo suba la voz.
             audioProcessingNoiseSuppression = true
-            // AGC desactivado: el control automático de ganancia "forzaba" el volumen,
-            // amplificando el ruido y saturando la voz. Sin él la voz suena natural.
-            audioProcessingAutoGainControl = false
+            // AGC reactivado: da volumen (voz fuerte, como walkie-talkie). Junto con
+            // la supresión de ruido, sube la voz sin amplificar el ruido de fondo.
+            audioProcessingAutoGainControl = true
             audioCodec = MediaConstraintsOption.AudioCodec.OPUS
         }
         val comp = RTCComponentFactory(opt)
