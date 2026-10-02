@@ -22,4 +22,9 @@ object Prefs {
     var speakerOn: Boolean
         get() = p?.getBoolean("speakerOn", true) ?: true
         set(v) { p?.edit()?.putBoolean("speakerOn", v)?.apply() }
+
+    /** Volumen de la radio (0..1) sobre STREAM_VOICE_CALL. Por defecto al máximo. */
+    var callVolume: Float
+        get() = p?.getFloat("callVolume", 1f) ?: 1f
+        set(v) { p?.edit()?.putFloat("callVolume", v)?.apply() }
 }

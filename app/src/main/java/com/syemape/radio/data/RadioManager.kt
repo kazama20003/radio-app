@@ -48,6 +48,7 @@ object RadioManager {
     var remoteSpeaking by mutableStateOf(false); private set // alguien habla
     var speakerLabel by mutableStateOf<String?>(null); private set // alias de quien habla
     var speakerOn by mutableStateOf(true); private set
+    var callVolume by mutableStateOf(1f); private set        // volumen de la radio 0..1
     var txFailed by mutableStateOf(false); private set
     var channels by mutableStateOf<List<RadioChannel>>(emptyList()); private set
     var normalDeviceLabel by mutableStateOf("Teléfono"); private set
@@ -140,6 +141,7 @@ object RadioManager {
             val list = runCatching { Backend.api.radioChannels() }.getOrNull().orEmpty()
             channels = list
             speakerOn = Prefs.speakerOn
+            callVolume = Prefs.callVolume
             val saved = Prefs.lastChannelId
             val ch = list.firstOrNull { it.id == saved }
                 ?: list.firstOrNull { it.joined }
@@ -360,6 +362,26 @@ object RadioManager {
         applyAudioRoute()
     }
 
+    /** Fija el volumen de la radio (0..1) sobre STREAM_VOICE_CALL. */
+    fun setVolume(fraction: Float) {
+        val f = fraction.coerceIn(0f, 1f)
+        if (f == callVolume) return
+        callVolume = f
+        Prefs.callVolume = f
+        applyStreamVolume()
+    }
+
+    /** Aplica [callVolume] al índice real de STREAM_VOICE_CALL. */
+    private fun applyStreamVolume() {
+        val am = sysAudio ?: return
+        runCatching {
+            val stream = AudioManager.STREAM_VOICE_CALL
+            val max = am.getStreamMaxVolume(stream)
+            val idx = Math.round(callVolume * max).coerceIn(0, max)
+            am.setStreamVolume(stream, idx, 0)
+        }
+    }
+
     @Volatile private var levelPolling = false
 
     /**
@@ -442,11 +464,8 @@ object RadioManager {
                 am.isSpeakerphoneOn = speakerOn
             }
             // WebRTC reproduce por STREAM_VOICE_CALL en MODE_IN_COMMUNICATION:
-            // mantenlo al máximo para que el audio no baje de volumen con el tiempo.
-            runCatching {
-                val stream = AudioManager.STREAM_VOICE_CALL
-                am.setStreamVolume(stream, am.getStreamMaxVolume(stream), 0)
-            }
+            // aplica el volumen elegido por el usuario (persistido).
+            applyStreamVolume()
         }
     }
 
@@ -492,7 +511,8 @@ object RadioManager {
             if (am.mode != AudioManager.MODE_IN_COMMUNICATION) am.mode = AudioManager.MODE_IN_COMMUNICATION
             val stream = AudioManager.STREAM_VOICE_CALL
             val max = am.getStreamMaxVolume(stream)
-            if (am.getStreamVolume(stream) < max) am.setStreamVolume(stream, max, 0)
+            val target = Math.round(callVolume * max).coerceIn(0, max)
+            if (am.getStreamVolume(stream) != target) am.setStreamVolume(stream, target, 0)
         }
     }
 

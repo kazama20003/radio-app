@@ -42,6 +42,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -167,7 +168,7 @@ fun RadioScreen(topPadding: Dp, bottomPadding: Dp = 0.dp, onOpenChannelChat: (St
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             Icon(MapeIcons.Speaker, null, tint = MapeColors.Ink, modifier = Modifier.size(20.dp))
-            VolumeSlider(0.8f, Modifier.weight(1f))
+            VolumeSlider(Modifier.weight(1f))
         }
 
         Spacer(Modifier.height(14.dp))
@@ -271,14 +272,32 @@ private fun TunerRuler(active: Boolean, level: Float, modifier: Modifier) {
     }
 }
 
+/** Slider de volumen de la radio: arrastrable y tocable; controla STREAM_VOICE_CALL. */
 @Composable
-private fun VolumeSlider(fraction: Float, modifier: Modifier) {
-    BoxWithConstraints(modifier.height(34.dp), contentAlignment = Alignment.CenterStart) {
+private fun VolumeSlider(modifier: Modifier) {
+    val fraction = RadioManager.callVolume.coerceIn(0f, 1f)
+    BoxWithConstraints(
+        modifier
+            .height(34.dp)
+            .pointerInput(Unit) {
+                detectTapGestures { pos ->
+                    RadioManager.setVolume((pos.x / size.width).coerceIn(0f, 1f))
+                }
+            }
+            .pointerInput(Unit) {
+                detectHorizontalDragGestures { change, _ ->
+                    change.consume()
+                    RadioManager.setVolume((change.position.x / size.width).coerceIn(0f, 1f))
+                }
+            },
+        contentAlignment = Alignment.CenterStart,
+    ) {
         val w = maxWidth
         Box(Modifier.fillMaxWidth().height(6.dp).clip(CircleShape).background(MapeColors.Border))
         Box(Modifier.fillMaxWidth(fraction).height(6.dp).clip(CircleShape).background(MapeColors.Ink))
+        // El pulgar (22dp) se mantiene dentro del carril: 0 → izquierda, 1 → derecha.
         Box(
-            Modifier.offset(x = w * fraction - 11.dp).size(22.dp).clip(CircleShape).background(MapeColors.Ink).border(3.dp, MapeColors.White, CircleShape),
+            Modifier.offset(x = (w - 22.dp) * fraction).size(22.dp).clip(CircleShape).background(MapeColors.Ink).border(3.dp, MapeColors.White, CircleShape),
         )
     }
 }
