@@ -137,8 +137,10 @@ fun RadioScreen(topPadding: Dp, bottomPadding: Dp = 0.dp, onOpenChannelChat: (St
 
         Spacer(Modifier.height(22.dp))
 
-        // ---- Estrella + compartir ----
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        // ---- Estrella + compartir + última nota de voz ----
+        val lastNote = RadioManager.lastVoiceNote
+        var lastPlaying by remember { mutableStateOf(false) }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
             Box(
                 Modifier.size(52.dp).clip(CircleShape).background(if (favorite) MapeColors.RedSoftBg else MapeColors.Bg).pressScale { favorite = !favorite },
                 contentAlignment = Alignment.Center,
@@ -147,6 +149,26 @@ fun RadioScreen(topPadding: Dp, bottomPadding: Dp = 0.dp, onOpenChannelChat: (St
                 Modifier.size(52.dp).clip(CircleShape).background(MapeColors.Bg).pressScale { },
                 contentAlignment = Alignment.Center,
             ) { Icon(MapeIcons.Share, null, tint = MapeColors.Ink, modifier = Modifier.size(20.dp)) }
+            // Escuchar la última nota de voz del canal (solo si hay).
+            if (lastNote != null) {
+                Row(
+                    Modifier.height(52.dp).clip(CircleShape).background(if (lastPlaying) MapeColors.Ink else MapeColors.Bg)
+                        .pressScale { RadioManager.playLastVoiceNote { id -> lastPlaying = id != null } }
+                        .padding(horizontal = 18.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Icon(
+                        if (lastPlaying) MapeIcons.Pause else MapeIcons.Play, null,
+                        tint = if (lastPlaying) MapeColors.White else MapeColors.Ink, modifier = Modifier.size(18.dp),
+                    )
+                    Text(
+                        "Última nota" + (lastNote.durationSec?.let { " · ${it.toInt()}s" } ?: ""),
+                        color = if (lastPlaying) MapeColors.White else MapeColors.Ink,
+                        fontFamily = Outfit, fontWeight = FontWeight.SemiBold, fontSize = 13.sp, maxLines = 1,
+                    )
+                }
+            }
         }
 
         Spacer(Modifier.height(26.dp))

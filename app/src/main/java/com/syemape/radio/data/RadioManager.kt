@@ -4,6 +4,7 @@ import android.app.Application
 import android.content.Context
 import android.content.pm.PackageManager
 import android.media.AudioManager
+import com.syemape.radio.BuildConfig
 import com.syemape.radio.RadioService
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -54,6 +55,7 @@ object RadioManager {
     var channels by mutableStateOf<List<RadioChannel>>(emptyList()); private set
     var normalDeviceLabel by mutableStateOf("Teléfono"); private set
     var audioLevel by mutableStateOf(0f); private set        // nivel de voz 0..1 (mueve la onda)
+    var lastVoiceNote by mutableStateOf<RadioTransmission?>(null); private set // última nota de voz del canal
 
     private val ui = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val worker = Executors.newSingleThreadExecutor()
@@ -142,6 +144,15 @@ object RadioManager {
             if (producerId.isNotEmpty()) worker.execute { consume(producerId, label) }
         })
         socket.on("ms:producerClosed", Emitter.Listener { worker.execute { closeConsumers() } })
+        // Última nota de voz grabada en el canal (para el botón de "escuchar última nota").
+        socket.on("ptt:ended", Emitter.Listener { args ->
+            val o = args.firstOrNull() as? JSONObject ?: return@Listener
+            if (o.optString("channelId") != channelId) return@Listener
+            if (!o.has("transmission")) return@Listener
+            val t = runCatching { Realtime.gson.fromJson(o.getJSONObject("transmission").toString(), RadioTransmission::class.java) }.getOrNull()
+                ?: return@Listener
+            if (!t.audioKey.isNullOrBlank()) ui.launch { lastVoiceNote = t }
+        })
         socket.on("connect", Emitter.Listener {
             worker.execute {
                 // En una reconexión los transports/producer del servidor son nuevos:
@@ -177,6 +188,7 @@ object RadioManager {
             members = if (me != null) 1 else 0
             socket.emit("channel:join", ch.id)
             connected = true
+            refreshLastVoiceNote(ch.id)
             registerAudioCallback()
             detectOutputLabel() // etiqueta de salida (Bluetooth/Auricular/Teléfono) ya al conectar
             RadioService.start(app, channelName)
@@ -242,6 +254,7 @@ object RadioManager {
             members = if (me != null) 1 else 0
         }
         talking = false; remoteSpeaking = false; speakerLabel = null; txFailed = false
+        lastVoiceNote = null // la nota es por-canal; se recarga la del canal nuevo
         RadioService.update(appRef, channelName)
         // Trabajo de red/mediasoup en segundo plano (no bloquea la UI)
         worker.execute {
@@ -249,6 +262,7 @@ object RadioManager {
             runCatching { producer?.close() }; producer = null
             prev?.let { socket.emit("channel:leave", it) }
             socket.emit("channel:join", id)
+            refreshLastVoiceNote(id)
             val cur = ack("ms:getProducer", JSONObject().put("channelId", id)) as? JSONObject
             val curProducer = cur?.optString("producerId")?.takeIf { it.isNotEmpty() }
             if (curProducer != null) consume(curProducer, cur?.let { speakerAliasFrom(it) } ?: "Alguien del canal")
@@ -459,6 +473,32 @@ object RadioManager {
 
     private fun audioMgr(): AudioManager? =
         sysAudio ?: (appRef?.getSystemService(Context.AUDIO_SERVICE) as? AudioManager)
+
+    /** Origen del backend (sin /api) para armar URLs de archivos. */
+    private val mediaOrigin: String by lazy { BuildConfig.API_BASE_URL.substringBefore("/api") }
+
+    private fun mediaUrlOf(key: String?): String? = when {
+        key.isNullOrBlank() -> null
+        key.startsWith("http") -> key
+        key.startsWith("/") -> mediaOrigin + key
+        else -> null
+    }
+
+    /** Carga la última nota de voz del canal desde el historial (más nuevo primero). */
+    private fun refreshLastVoiceNote(cid: String) {
+        ui.launch {
+            val hist = runCatching { Backend.api.radioHistory(cid) }.getOrNull().orEmpty()
+            val note = hist.firstOrNull { !it.audioKey.isNullOrBlank() }
+            if (channelId == cid) lastVoiceNote = note
+        }
+    }
+
+    /** Reproduce la última nota de voz del canal (con el enrutado de la radio). */
+    fun playLastVoiceNote(onState: (String?) -> Unit) {
+        val note = lastVoiceNote ?: return
+        val url = mediaUrlOf(note.audioKey) ?: return
+        playVoiceNote(url, note.id, onState)
+    }
 
     /**
      * Reproduce una nota de voz del chat fuerte, como la radio. [onState] avisa a
