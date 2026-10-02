@@ -19,6 +19,7 @@
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
     <application
+        android:name=".RadioApp"
         android:allowBackup="false"
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher_round"
@@ -39,6 +40,7 @@
         <service
             android:name=".RadioService"
             android:exported="false"
+            android:stopWithTask="false"
             android:foregroundServiceType="microphone|mediaPlayback" />
     </application>
 </manifest>

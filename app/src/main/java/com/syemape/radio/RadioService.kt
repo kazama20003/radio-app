@@ -44,9 +44,22 @@ class RadioService : Service() {
             refresh(this) // re-postea la notificación con el estado nuevo (Hablar/Cortar)
             return START_STICKY
         }
-        val channel = intent?.getStringExtra(EXTRA_CHANNEL) ?: "Canal"
+        val channel = intent?.getStringExtra(EXTRA_CHANNEL)
+            ?: com.syemape.radio.data.RadioManager.channelName
         startForegroundCompat(channel)
         acquireWakeLock()
+        // Si el sistema revivió el proceso (START_STICKY) sin abrir la UI —p.ej.
+        // tras cerrar la app desde Recientes o tras matar el proceso— re-arranca
+        // el motor de radio para seguir escuchando. start() es idempotente; solo
+        // si hay sesión (si no, cierra el servicio para no quedar colgado).
+        if (com.syemape.radio.data.Backend.tokens.accessToken != null) {
+            runCatching { com.syemape.radio.data.RadioManager.start(application) }
+        } else {
+            releaseWakeLock()
+            stopForegroundCompat()
+            stopSelf()
+            return START_NOT_STICKY
+        }
         return START_STICKY // se reinicia si el sistema lo mata
     }
 
