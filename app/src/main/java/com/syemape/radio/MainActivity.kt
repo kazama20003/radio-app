@@ -124,13 +124,15 @@ private fun AppRoot() {
                   context.checkSelfPermission(it) != android.content.pm.PackageManager.PERMISSION_GRANTED
               }
               if (missing.isNotEmpty()) permLauncher.launch(missing.toTypedArray())
-              // Pide excluir la app de la optimización de batería: sin esto, muchos
-              // fabricantes (Xiaomi/Huawei/Samsung/Oppo…) suspenden o matan la radio
-              // en 2º plano y el canal se corta al cambiar de app. Prompt del sistema
-              // una sola vez (si ya está excluida, no hace nada).
+              // Exención de optimización de batería (clave para no cortarse en 2º plano
+              // en Xiaomi/Huawei/Samsung/Oppo…). Se pide UNA SOLA VEZ y solo si NO está
+              // ya activada: si ya está exenta no se pide nunca, y si el usuario la vio
+              // una vez no se vuelve a molestar (bandera persistente).
               runCatching {
                   val pm = context.getSystemService(android.content.Context.POWER_SERVICE) as android.os.PowerManager
-                  if (!pm.isIgnoringBatteryOptimizations(context.packageName)) {
+                  val exempt = pm.isIgnoringBatteryOptimizations(context.packageName)
+                  if (!exempt && !com.syemape.radio.data.Prefs.batteryOptAsked) {
+                      com.syemape.radio.data.Prefs.batteryOptAsked = true
                       context.startActivity(
                           android.content.Intent(android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS)
                               .setData(android.net.Uri.parse("package:${context.packageName}"))
