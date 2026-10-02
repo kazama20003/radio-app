@@ -420,6 +420,67 @@ object RadioManager {
         }
     }
 
+    // ── Reproducción de notas de voz del chat ────────────────────
+    // Antes sonaban por el stream de MEDIA (volumen multimedia del teléfono) y
+    // se oían más bajas que la radio. Ahora usan el MISMO enrutado que la radio
+    // (STREAM_VOICE_CALL + altavoz + volumen de la radio) para que suenen igual.
+    private var notePlayer: android.media.MediaPlayer? = null
+    private var notePlayingId: String? = null
+    @Volatile private var noteRoutedByUs = false
+
+    private fun audioMgr(): AudioManager? =
+        sysAudio ?: (appRef?.getSystemService(Context.AUDIO_SERVICE) as? AudioManager)
+
+    /**
+     * Reproduce una nota de voz del chat fuerte, como la radio. [onState] avisa a
+     * la UI qué id suena (o null al parar). Es toggle: mismo id => detiene.
+     */
+    fun playVoiceNote(url: String, id: String, onState: (String?) -> Unit) {
+        if (notePlayingId == id) { stopVoiceNote(onState); return }
+        stopVoiceNote { } // corta cualquier otra nota en curso
+        val am = audioMgr()
+        runCatching {
+            // Enruta como la radio (altavoz + modo comunicación). Si la radio ya
+            // tiene su sesión activa, NO la tocamos (ella manda).
+            if (am != null && !audioSessionActive) {
+                noteRoutedByUs = true
+                am.mode = AudioManager.MODE_IN_COMMUNICATION
+                am.isSpeakerphoneOn = speakerOn
+            }
+            applyStreamVolume() // sube STREAM_VOICE_CALL al volumen de la radio
+            val mp = android.media.MediaPlayer()
+            mp.setAudioAttributes(
+                android.media.AudioAttributes.Builder()
+                    .setUsage(android.media.AudioAttributes.USAGE_VOICE_COMMUNICATION)
+                    .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SPEECH)
+                    .build()
+            )
+            mp.setDataSource(url)
+            mp.setOnPreparedListener { it.start(); notePlayingId = id; ui.launch { onState(id) } }
+            mp.setOnCompletionListener { stopVoiceNote(onState) }
+            mp.setOnErrorListener { _, _, _ -> stopVoiceNote(onState); true }
+            mp.prepareAsync()
+            notePlayer = mp
+        }.onFailure { stopVoiceNote(onState) }
+    }
+
+    /** Detiene la nota de voz y devuelve el audio a normal si lo enrutamos nosotros. */
+    fun stopVoiceNote(onState: (String?) -> Unit) {
+        runCatching { notePlayer?.stop() }
+        runCatching { notePlayer?.release() }
+        notePlayer = null
+        notePlayingId = null
+        ui.launch { onState(null) }
+        if (noteRoutedByUs && !audioSessionActive) {
+            noteRoutedByUs = false
+            val am = audioMgr()
+            runCatching {
+                am?.isSpeakerphoneOn = false
+                if (am?.mode == AudioManager.MODE_IN_COMMUNICATION) am.mode = AudioManager.MODE_NORMAL
+            }
+        }
+    }
+
     @Volatile private var levelPolling = false
 
     /**

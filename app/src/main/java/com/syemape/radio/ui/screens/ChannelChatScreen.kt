@@ -158,31 +158,13 @@ fun ChannelChatScreen(channelId: String, title: String, topPadding: Dp, bottomPa
         if (uri != null) sendMedia(uri)
     }
 
-    // Reproductor de notas de voz (uno compartido; playingId = burbuja sonando).
-    val player = remember { android.media.MediaPlayer() }
+    // Notas de voz: las reproduce RadioManager con el MISMO enrutado que la radio
+    // (stream de llamada + altavoz + volumen de la radio) para que suenen fuerte.
     var playingId by remember { mutableStateOf<String?>(null) }
-    DisposableEffect(Unit) { onDispose { runCatching { player.release() } } }
+    DisposableEffect(Unit) { onDispose { com.syemape.radio.data.RadioManager.stopVoiceNote { } } }
     fun toggleVoice(t: RadioTransmission) {
         val url = urlOf(t.audioKey) ?: return
-        if (playingId == t.id) { // ya sonando esta → pausar/detener
-            runCatching { player.stop() }
-            playingId = null
-            return
-        }
-        runCatching {
-            player.reset()
-            player.setAudioAttributes(
-                android.media.AudioAttributes.Builder()
-                    .setUsage(android.media.AudioAttributes.USAGE_MEDIA)
-                    .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SPEECH)
-                    .build()
-            )
-            player.setDataSource(url)
-            player.setOnPreparedListener { it.start(); playingId = t.id }
-            player.setOnCompletionListener { playingId = null }
-            player.setOnErrorListener { _, _, _ -> playingId = null; true }
-            player.prepareAsync()
-        }.onFailure { playingId = null }
+        com.syemape.radio.data.RadioManager.playVoiceNote(url, t.id) { playingId = it }
     }
 
     LaunchedEffect(channelId) {
