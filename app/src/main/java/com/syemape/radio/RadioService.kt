@@ -61,14 +61,27 @@ class RadioService : Service() {
     private fun startForegroundCompat(channelText: String) {
         ensureChannel(this)
         val notif = buildNotification(this, channelText)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
-            } else 0
-            runCatching { startForeground(NOTIF_ID, notif, type) }
-                .onFailure { startForeground(NOTIF_ID, notif) }
-        } else {
-            startForeground(NOTIF_ID, notif)
+        // Robusto en todos los celulares: el tipo "micrófono" en Android 14+ (targetSdk alto)
+        // puede rechazarse si falta el permiso RECORD_AUDIO o si se intenta desde 2.º plano;
+        // en ese caso caemos a "reproducción multimedia", y si aún falla, sin tipo. Nunca
+        // dejamos que un fallo al promover el servicio tumbe la app.
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                val hasMic = checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) ==
+                    android.content.pm.PackageManager.PERMISSION_GRANTED
+                val primaryType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && hasMic) {
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+                } else {
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
+                }
+                runCatching { startForeground(NOTIF_ID, notif, primaryType) }
+                    .recoverCatching { startForeground(NOTIF_ID, notif, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK) }
+                    .recoverCatching { startForeground(NOTIF_ID, notif) }
+            } else {
+                startForeground(NOTIF_ID, notif)
+            }
+        } catch (e: Exception) {
+            // Último recurso: no crashear. La radio sigue funcionando en primer plano.
         }
     }
 

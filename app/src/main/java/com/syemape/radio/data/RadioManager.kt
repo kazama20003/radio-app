@@ -239,7 +239,10 @@ object RadioManager {
                         }
                         override fun onConnectionStateChange(transport: Transport, connectionState: String) {}
                         override fun onProduce(transport: Transport, kind: String, rtpParameters: String, appData: String?): String {
-                            val r = ack("ms:produce", JSONObject().put("channelId", cid).put("rtpParameters", JSONObject(rtpParameters))) as? JSONObject
+                            // Usa el canal ACTUAL (no el capturado al crear el transport): si no,
+                            // tras cambiar de canal se produciría en el canal viejo y no se transmite.
+                            val ch = channelId ?: cid
+                            val r = ack("ms:produce", JSONObject().put("channelId", ch).put("rtpParameters", JSONObject(rtpParameters))) as? JSONObject
                             return r?.optString("id")?.takeIf { it.isNotEmpty() } ?: throw RuntimeException("produce failed")
                         }
                         override fun onProduceData(transport: Transport, sctpStreamParameters: String, label: String, protocol: String, appData: String?): String = ""
