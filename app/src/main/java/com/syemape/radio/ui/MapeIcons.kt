@@ -129,4 +129,18 @@ object MapeIcons {
     val SkipBack = buildIcon(2f, Part("M18 6v12l-9-6zM7 6v12"))
     val Prev = buildIcon(2f, Part("M11 6v12l-8-6zM20 6v12l-8-6z"))
     val Next = buildIcon(2f, Part("M4 6v12l8-6zM13 6v12l8-6z"))
+    // Medidor / velocímetro — alerta de exceso de velocidad.
+    val Gauge = buildIcon(
+        1.9f,
+        Part("M4 16a8 8 0 0 1 16 0"),
+        Part("M12 16l4-4"),
+        Part(circlePath(12f, 16f, 1.3f), fill = true),
+    )
+    // Triángulo de alerta — severidad crítica / fallback.
+    val AlertTriangle = buildIcon(
+        1.9f,
+        Part("M12 4L21 19H3z"),
+        Part("M12 10v4"),
+        Part(circlePath(12f, 16.5f, 0.8f), fill = true),
+    )
 }

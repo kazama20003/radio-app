@@ -114,7 +114,8 @@ class RadioService : Service() {
                 android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE,
             )
             return NotificationCompat.Builder(context, CHANNEL_ID)
-                .setSmallIcon(android.R.drawable.ic_btn_speak_now)
+                .setSmallIcon(com.syemape.radio.R.drawable.ic_stat_radio)
+                .setColor(0xFFE5322D.toInt())
                 .apply { if (logo != null) setLargeIcon(logo) }
                 .setContentTitle(channelText)
                 .setContentText("Radio en vivo · tu equipo te escucha")
@@ -122,8 +123,9 @@ class RadioService : Service() {
                 .setSilent(true)
                 .setShowWhen(false)
                 .setPriority(NotificationCompat.PRIORITY_LOW)
+                .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
                 .setContentIntent(pi)
-                .addAction(0, "Desconectar", stopPi)
+                .addAction(com.syemape.radio.R.drawable.ic_stat_radio, "Desconectar", stopPi)
                 .build()
         }
 

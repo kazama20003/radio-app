@@ -43,6 +43,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         Backend.init(applicationContext)
         com.syemape.radio.data.Prefs.init(applicationContext)
+        com.syemape.radio.data.Notifier.init(applicationContext)
         SessionManager.bootstrap()
         enableEdgeToEdge()
         setContent {

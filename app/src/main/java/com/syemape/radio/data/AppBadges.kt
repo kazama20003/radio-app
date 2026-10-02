@@ -38,7 +38,11 @@ object AppBadges {
         val chat = Realtime.socket("/chat")
         chat.on("conversation:updated", Emitter.Listener { refresh() })
         val alerts = Realtime.socket("/alerts")
-        alerts.on("alert:new", Emitter.Listener { scope.launch { pendingAlerts += 1 } })
+        alerts.on("alert:new", Emitter.Listener { args ->
+            scope.launch { pendingAlerts += 1 }
+            // Blindado: un fallo al notificar nunca debe romper el hilo del socket.
+            runCatching { Realtime.parse<Alert>(args)?.let { Notifier.notifyAlert(it) } }
+        })
         alerts.on("alert:updated", Emitter.Listener { refresh() })
     }
 

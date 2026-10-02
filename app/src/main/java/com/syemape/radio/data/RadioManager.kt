@@ -120,7 +120,18 @@ object RadioManager {
         })
         socket.on("ms:producerClosed", Emitter.Listener { worker.execute { closeConsumers() } })
         socket.on("connect", Emitter.Listener {
-            worker.execute { setupDone = false; channelId?.let { socket.emit("channel:join", it) }; setupMediasoup() }
+            worker.execute {
+                // En una reconexión los transports/producer del servidor son nuevos:
+                // descartamos los viejos (muertos) para que setupMediasoup los rearme.
+                setupDone = false
+                closeConsumers()
+                runCatching { producer?.close() }; producer = null
+                runCatching { sendTransport?.close() }; sendTransport = null
+                runCatching { recvTransport?.close() }; recvTransport = null
+                ui.launch { talking = false }
+                channelId?.let { socket.emit("channel:join", it) }
+                setupMediasoup()
+            }
         })
         if (!socket.connected()) socket.connect()
 
@@ -187,52 +198,59 @@ object RadioManager {
     @Volatile private var setupDone = false
 
     private fun setupMediasoup() {
-        if (setupDone) return
+        // Listo solo si ambos transports existen; si no, reintenta lo que falte.
+        if (setupDone && sendTransport != null && recvTransport != null) return
         val cid = channelId ?: return
         val f = factory ?: return
         val caps = ack("ms:rtpCapabilities") as? JSONObject ?: return
-        setupDone = true
         val dev = device ?: Device(f).also { device = it }
-        if (!dev.loaded) dev.load(caps.toString())
+        if (!dev.loaded) runCatching { dev.load(caps.toString()) }
 
         // recvTransport
-        val recvInfo = ack("ms:createTransport", JSONObject().put("direction", "recv")) as? JSONObject
-        if (recvInfo != null && !recvInfo.has("error")) {
-            recvTransport = dev.createRecvTransport(
-                object : RecvTransport.Listener {
-                    override fun onConnect(transport: Transport, dtlsParameters: String) {
-                        ack("ms:connectTransport", JSONObject().put("direction", "recv").put("dtlsParameters", JSONObject(dtlsParameters)))
-                    }
-                    override fun onConnectionStateChange(transport: Transport, connectionState: String) {}
-                },
-                recvInfo.getString("id"),
-                recvInfo.getJSONObject("iceParameters").toString(),
-                recvInfo.getJSONArray("iceCandidates").toString(),
-                recvInfo.getJSONObject("dtlsParameters").toString(),
-            )
+        if (recvTransport == null) {
+            val recvInfo = ack("ms:createTransport", JSONObject().put("direction", "recv")) as? JSONObject
+            if (recvInfo != null && !recvInfo.has("error")) {
+                recvTransport = dev.createRecvTransport(
+                    object : RecvTransport.Listener {
+                        override fun onConnect(transport: Transport, dtlsParameters: String) {
+                            ack("ms:connectTransport", JSONObject().put("direction", "recv").put("dtlsParameters", JSONObject(dtlsParameters)))
+                        }
+                        override fun onConnectionStateChange(transport: Transport, connectionState: String) {}
+                    },
+                    recvInfo.getString("id"),
+                    recvInfo.getJSONObject("iceParameters").toString(),
+                    recvInfo.getJSONArray("iceCandidates").toString(),
+                    recvInfo.getJSONObject("dtlsParameters").toString(),
+                )
+            }
         }
 
         // sendTransport (pre-armado)
-        val sendInfo = ack("ms:createTransport", JSONObject().put("direction", "send")) as? JSONObject
-        if (sendInfo != null && !sendInfo.has("error")) {
-            sendTransport = dev.createSendTransport(
-                object : SendTransport.Listener {
-                    override fun onConnect(transport: Transport, dtlsParameters: String) {
-                        ack("ms:connectTransport", JSONObject().put("direction", "send").put("dtlsParameters", JSONObject(dtlsParameters)))
-                    }
-                    override fun onConnectionStateChange(transport: Transport, connectionState: String) {}
-                    override fun onProduce(transport: Transport, kind: String, rtpParameters: String, appData: String?): String {
-                        val r = ack("ms:produce", JSONObject().put("channelId", cid).put("rtpParameters", JSONObject(rtpParameters))) as? JSONObject
-                        return r?.optString("id") ?: throw RuntimeException("produce failed")
-                    }
-                    override fun onProduceData(transport: Transport, sctpStreamParameters: String, label: String, protocol: String, appData: String?): String = ""
-                },
-                sendInfo.getString("id"),
-                sendInfo.getJSONObject("iceParameters").toString(),
-                sendInfo.getJSONArray("iceCandidates").toString(),
-                sendInfo.getJSONObject("dtlsParameters").toString(),
-            )
+        if (sendTransport == null) {
+            val sendInfo = ack("ms:createTransport", JSONObject().put("direction", "send")) as? JSONObject
+            if (sendInfo != null && !sendInfo.has("error")) {
+                sendTransport = dev.createSendTransport(
+                    object : SendTransport.Listener {
+                        override fun onConnect(transport: Transport, dtlsParameters: String) {
+                            ack("ms:connectTransport", JSONObject().put("direction", "send").put("dtlsParameters", JSONObject(dtlsParameters)))
+                        }
+                        override fun onConnectionStateChange(transport: Transport, connectionState: String) {}
+                        override fun onProduce(transport: Transport, kind: String, rtpParameters: String, appData: String?): String {
+                            val r = ack("ms:produce", JSONObject().put("channelId", cid).put("rtpParameters", JSONObject(rtpParameters))) as? JSONObject
+                            return r?.optString("id")?.takeIf { it.isNotEmpty() } ?: throw RuntimeException("produce failed")
+                        }
+                        override fun onProduceData(transport: Transport, sctpStreamParameters: String, label: String, protocol: String, appData: String?): String = ""
+                    },
+                    sendInfo.getString("id"),
+                    sendInfo.getJSONObject("iceParameters").toString(),
+                    sendInfo.getJSONArray("iceCandidates").toString(),
+                    sendInfo.getJSONObject("dtlsParameters").toString(),
+                )
+            }
         }
+
+        // Marcar listo solo cuando ambos transports quedaron armados (si no, se reintenta).
+        setupDone = sendTransport != null && recvTransport != null
 
         // consumir al hablante actual si hay
         val cur = ack("ms:getProducer", JSONObject().put("channelId", cid)) as? JSONObject
@@ -296,15 +314,22 @@ object RadioManager {
         runCatching { audioManager?.enabled = true } // activa el micrófono ya
         beep(android.media.ToneGenerator.TONE_PROP_BEEP, 150) // pitido de inicio
         worker.execute {
-            val send = sendTransport ?: run { ui.launch { talking = false; txFailed = true }; return@execute }
-            val track = audioManager?.track ?: return@execute
+            fun fail() { ui.launch { talking = false; txFailed = true }; runCatching { audioManager?.enabled = false } }
+            // Si se presionó HABLAR antes de que WebRTC/mediasoup terminara de armarse
+            // (o si un intento previo falló), lo preparamos ahora en vez de rendirnos.
+            if (sendTransport == null) {
+                appRef?.let { runCatching { initWebrtc(it) } }
+                runCatching { setupMediasoup() }
+            }
+            if (!talking) return@execute // el usuario soltó durante el setup
+            val send = sendTransport ?: return@execute fail()
+            val track = audioManager?.track ?: return@execute fail()
             try {
                 producer = send.produce(object : Producer.Listener {
                     override fun onTransportClose(producer: Producer) {}
                 }, track)
             } catch (e: Exception) {
-                ui.launch { talking = false; txFailed = true }
-                runCatching { audioManager?.enabled = false }
+                fail()
             }
         }
     }

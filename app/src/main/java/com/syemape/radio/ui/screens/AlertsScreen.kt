@@ -28,6 +28,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -35,13 +36,10 @@ import androidx.compose.ui.unit.sp
 import com.syemape.radio.data.Alert
 import com.syemape.radio.data.Backend
 import com.syemape.radio.data.Fmt
-import com.syemape.radio.ui.Avatar
+import com.syemape.radio.ui.Dot
 import com.syemape.radio.ui.FilterRow
 import com.syemape.radio.ui.MapeIcons
-import com.syemape.radio.ui.avatarColor
-import com.syemape.radio.ui.initialsOf
 import com.syemape.radio.ui.pressScale
-import com.syemape.radio.ui.rememberAsync
 import com.syemape.radio.ui.theme.MapeColors
 import com.syemape.radio.ui.theme.Outfit
 import kotlinx.coroutines.launch
@@ -53,6 +51,13 @@ private fun Alert.subtitle(): String {
     val code = unit?.code ?: ""
     val base = listOf(who, code).filter { it.isNotBlank() }.joinToString(" · ")
     return if (!description.isNullOrBlank()) "$base — $description" else base
+}
+
+/** Icono representativo según el tipo de alerta. */
+private fun Alert.icon(): ImageVector = when (type) {
+    "EXCESO_VELOCIDAD" -> MapeIcons.Gauge
+    "SALIDA_GEOCERCA" -> MapeIcons.Pin
+    else -> MapeIcons.AlertTriangle
 }
 
 @Composable
@@ -107,9 +112,13 @@ fun AlertsScreen(topPadding: Dp, onGoMap: () -> Unit = {}, onGoRadio: () -> Unit
                 Row(
                     Modifier.height(40.dp).clip(CircleShape).background(MapeColors.White)
                         .pressScale { scope.launch { runCatching { Backend.api.markAlertsRead() }; reload() } }
-                        .padding(horizontal = 16.dp),
+                        .padding(horizontal = 14.dp),
                     verticalAlignment = Alignment.CenterVertically,
-                ) { Text("Marcar leídas", color = MapeColors.Ink, fontFamily = Outfit, fontWeight = FontWeight.SemiBold, fontSize = 13.sp) }
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    Icon(MapeIcons.DoubleCheck, null, tint = MapeColors.Ink, modifier = Modifier.size(15.dp))
+                    Text("Marcar leídas", color = MapeColors.Ink, fontFamily = Outfit, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                }
             }
         }
         item {
@@ -123,54 +132,103 @@ fun AlertsScreen(topPadding: Dp, onGoMap: () -> Unit = {}, onGoRadio: () -> Unit
             Spacer(Modifier.height(16.dp))
             FilterRow(listOf("Todas", "Velocidad", "Geocerca"), filter) { filter = it }
         }
-        item {
-            Text(
-                if (loading) "Cargando…" else "${list.size} alertas",
-                color = MapeColors.TextFaint, fontFamily = Outfit, fontSize = 13.sp,
-                modifier = Modifier.padding(top = 18.dp, bottom = 8.dp, start = 4.dp),
-            )
-        }
-        items(list) { a ->
-            val critical = a.severity == "CRITICA"
-            Row(
-                Modifier.fillMaxWidth().padding(bottom = 8.dp).clip(RoundedCornerShape(22.dp)).background(MapeColors.White)
-                    .then(if (critical) Modifier.border(1.5.dp, MapeColors.Red, RoundedCornerShape(22.dp)) else Modifier)
-                    .padding(14.dp),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                Avatar(
-                    initialsOf(a.operator?.name ?: a.title),
-                    avatarColor(a.operator?.id ?: a.id),
-                    size = 46.dp,
-                    border = if (critical) 2.5.dp else 0.dp,
-                    borderColor = MapeColors.Red,
+        if (list.isNotEmpty()) {
+            item {
+                Text(
+                    "${list.size} ${if (list.size == 1) "alerta" else "alertas"}",
+                    color = MapeColors.TextFaint, fontFamily = Outfit, fontSize = 13.sp,
+                    modifier = Modifier.padding(top = 18.dp, bottom = 8.dp, start = 4.dp),
                 )
-                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                        Text(a.title.uppercase(), color = if (critical) MapeColors.RedDark else Color(0xFF4A4A4A), fontFamily = Outfit, fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                        Text(Fmt.hace(a.createdAt), color = MapeColors.TextFaint, fontFamily = Outfit, fontSize = 12.sp)
-                    }
-                    Text(a.subtitle(), color = MapeColors.Ink, fontFamily = Outfit, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
-                    if (!a.locationLabel.isNullOrBlank()) {
-                        Text(a.locationLabel, color = MapeColors.TextMuted, fontFamily = Outfit, fontSize = 13.sp)
-                    }
-                    if (critical) {
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 4.dp)) {
-                            Row(
-                                Modifier.height(38.dp).clip(CircleShape).background(MapeColors.Red).pressScale { onGoRadio() }.padding(horizontal = 14.dp),
-                                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp),
-                            ) {
-                                Icon(MapeIcons.Mic, null, tint = MapeColors.White, modifier = Modifier.size(16.dp))
-                                Text("Radio", color = MapeColors.White, fontFamily = Outfit, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
-                            }
-                            Row(
-                                Modifier.height(38.dp).clip(CircleShape).background(MapeColors.Bg).pressScale { onGoMap() }.padding(horizontal = 14.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) { Text("Ver en mapa", color = MapeColors.Ink, fontFamily = Outfit, fontWeight = FontWeight.SemiBold, fontSize = 13.sp) }
-                        }
-                    }
+            }
+            items(list) { a -> AlertCard(a, onGoMap, onGoRadio) }
+        } else {
+            item { EmptyState(loading) }
+        }
+    }
+}
+
+@Composable
+private fun AlertCard(a: Alert, onGoMap: () -> Unit, onGoRadio: () -> Unit) {
+    val critical = a.severity == "CRITICA"
+    Row(
+        Modifier.fillMaxWidth().padding(bottom = 8.dp).clip(RoundedCornerShape(22.dp)).background(MapeColors.White)
+            .then(if (critical) Modifier.border(1.5.dp, MapeColors.Red, RoundedCornerShape(22.dp)) else Modifier)
+            .padding(14.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        // Badge de tipo: círculo con icono. Rojo si es crítica, negro si no.
+        Box(
+            Modifier.size(46.dp).clip(CircleShape).background(if (critical) MapeColors.Red else MapeColors.Ink),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(a.icon(), null, tint = MapeColors.White, modifier = Modifier.size(22.dp))
+        }
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    if (critical) Dot(MapeColors.Red, 7.dp)
+                    Text(a.title.uppercase(), color = if (critical) MapeColors.RedDark else Color(0xFF4A4A4A), fontFamily = Outfit, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                }
+                Text(Fmt.hace(a.createdAt), color = MapeColors.TextFaint, fontFamily = Outfit, fontSize = 12.sp)
+            }
+            Text(a.subtitle(), color = MapeColors.Ink, fontFamily = Outfit, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+            if (!a.locationLabel.isNullOrBlank()) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Icon(MapeIcons.Pin, null, tint = MapeColors.TextMuted, modifier = Modifier.size(13.dp))
+                    Text(a.locationLabel, color = MapeColors.TextMuted, fontFamily = Outfit, fontSize = 13.sp)
                 }
             }
+            if (critical) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 4.dp)) {
+                    Row(
+                        Modifier.height(38.dp).clip(CircleShape).background(MapeColors.Red).pressScale { onGoRadio() }.padding(horizontal = 14.dp),
+                        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        Icon(MapeIcons.Mic, null, tint = MapeColors.White, modifier = Modifier.size(16.dp))
+                        Text("Radio", color = MapeColors.White, fontFamily = Outfit, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                    }
+                    Row(
+                        Modifier.height(38.dp).clip(CircleShape).background(MapeColors.Bg).pressScale { onGoMap() }.padding(horizontal = 14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) { Text("Ver en mapa", color = MapeColors.Ink, fontFamily = Outfit, fontWeight = FontWeight.SemiBold, fontSize = 13.sp) }
+                }
+            }
+        }
+    }
+}
+
+/** Estado vacío (sin alertas) o de carga, centrado en el espacio disponible. */
+@Composable
+private fun EmptyState(loading: Boolean) {
+    Column(
+        Modifier.fillMaxWidth().height(360.dp),
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Box(
+            Modifier.size(80.dp).clip(CircleShape).background(MapeColors.White),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                if (loading) MapeIcons.Clock else MapeIcons.Bell,
+                null,
+                tint = if (loading) MapeColors.TextMuted else MapeColors.Ink,
+                modifier = Modifier.size(34.dp),
+            )
+        }
+        Spacer(Modifier.height(18.dp))
+        Text(
+            if (loading) "Cargando alertas…" else "Todo en orden",
+            color = MapeColors.Ink, fontFamily = Outfit, fontWeight = FontWeight.SemiBold, fontSize = 18.sp,
+        )
+        if (!loading) {
+            Spacer(Modifier.height(6.dp))
+            Text(
+                "No hay alertas por ahora.\nTe avisaremos cuando ocurra algo.",
+                color = MapeColors.TextMuted, fontFamily = Outfit, fontSize = 14.sp,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                lineHeight = 20.sp,
+            )
         }
     }
 }
