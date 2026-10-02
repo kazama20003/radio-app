@@ -4,3 +4,9 @@ build/
 app/build/
 local.properties
 *.iml
+
+# Firma de release (NUNCA subir: credenciales y keystore)
+keystore.properties
+keystore/
+*.jks
+*.keystore
