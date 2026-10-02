@@ -187,6 +187,7 @@ object RadioManager {
                 while (started) {
                     delay(2000)
                     if (connected) keepAudioAlive()
+                    ensureSocketAlive() // si el socket se cayó en 2º plano, lo levanta
                 }
             }
             startLevelLoop()
@@ -194,6 +195,34 @@ object RadioManager {
             worker.execute {
                 runCatching { initWebrtc(app) }.onFailure { return@execute }
                 setupMediasoup()
+            }
+        }
+    }
+
+    /** Reconecta el socket si se cayó (el listener 'connect' rearma todo). Barato. */
+    private fun ensureSocketAlive() {
+        if (!started) return
+        runCatching { if (!socket.connected()) socket.connect() }
+    }
+
+    /**
+     * Resincroniza al volver la app a primer plano: reconecta si hace falta, re-entra
+     * al canal y reconsume al que esté hablando (por si nos perdimos un `ms:newProducer`
+     * mientras el SO nos tuvo suspendidos). Seguro de llamar siempre.
+     */
+    fun ensureAlive() {
+        if (!started) return
+        worker.execute {
+            if (!socket.connected()) {
+                runCatching { socket.connect() } // 'connect' rearma join + transports
+                return@execute
+            }
+            val cid = channelId ?: return@execute
+            socket.emit("channel:join", cid)
+            if (consumers.isEmpty()) {
+                val cur = ack("ms:getProducer", JSONObject().put("channelId", cid)) as? JSONObject
+                val pid = cur?.optString("producerId")?.takeIf { it.isNotEmpty() }
+                if (pid != null) consume(pid, cur?.let { speakerAliasFrom(it) } ?: "Alguien del canal")
             }
         }
     }

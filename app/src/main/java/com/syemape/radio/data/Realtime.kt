@@ -24,6 +24,13 @@ object Realtime {
         val opts = IO.Options().apply {
             transports = arrayOf(WebSocket.NAME)
             reconnection = true
+            // Reconexión robusta: nunca se rinde y reintenta rápido. Clave para que
+            // la radio se recupere sola tras suspensiones en 2º plano de algunos
+            // fabricantes (Xiaomi/Huawei/Samsung/Oppo…).
+            reconnectionAttempts = Int.MAX_VALUE
+            reconnectionDelay = 800
+            reconnectionDelayMax = 4000
+            timeout = 8000
             auth = mapOf("token" to (Backend.tokens.accessToken ?: ""))
         }
         val s = IO.socket(origin + namespace, opts)

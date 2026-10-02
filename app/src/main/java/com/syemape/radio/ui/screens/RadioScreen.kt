@@ -173,7 +173,7 @@ fun RadioScreen(topPadding: Dp, bottomPadding: Dp = 0.dp, onOpenChannelChat: (St
 
         Spacer(Modifier.weight(1f))
 
-        // ---- Salida de audio (selector): dispositivo normal vs altavoz ----
+        // ---- Salida de audio (compacta): dispositivo normal vs altavoz ----
         Row(
             Modifier.fillMaxWidth().clip(RoundedCornerShape(26.dp)).background(MapeColors.Bg).padding(5.dp),
             horizontalArrangement = Arrangement.spacedBy(4.dp),
@@ -182,45 +182,56 @@ fun RadioScreen(topPadding: Dp, bottomPadding: Dp = 0.dp, onOpenChannelChat: (St
             OutputPill("Altavoz", selected = RadioManager.speakerOn) { RadioManager.setSpeaker(true) }
         }
 
-        Spacer(Modifier.height(10.dp))
+        Spacer(Modifier.height(18.dp))
 
-        // ---- Volumen ----
+        // ---- Control: HABLAR (push-to-talk) — botón circular grande, centrado ----
+        Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) { HoldTalkButton() }
+
+        Spacer(Modifier.height(16.dp))
+
+        // ---- Volumen (compacto: ocupa poco espacio) ----
         Row(
-            Modifier.fillMaxWidth().clip(RoundedCornerShape(26.dp)).background(MapeColors.Bg).padding(horizontal = 16.dp, vertical = 6.dp),
+            Modifier.fillMaxWidth().padding(horizontal = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            Icon(MapeIcons.Speaker, null, tint = MapeColors.Ink, modifier = Modifier.size(20.dp))
+            Icon(MapeIcons.Speaker, null, tint = MapeColors.TextMuted, modifier = Modifier.size(18.dp))
             VolumeSlider(Modifier.weight(1f))
         }
-
-        Spacer(Modifier.height(14.dp))
-
-        // ---- Control: HABLAR (push-to-talk) ----
-        HoldTalkButton(Modifier.fillMaxWidth())
     }
 }
 
 @Composable
-private fun HoldTalkButton(modifier: Modifier) {
-    Column(
-        modifier
-            .height(96.dp)
-            .clip(RoundedCornerShape(28.dp))
-            .background(if (RadioManager.talking) MapeColors.Red else MapeColors.Ink)
-            .pointerInput(Unit) {
-                detectTapGestures(onPress = {
-                    RadioManager.startTalking()
-                    tryAwaitRelease()
-                    RadioManager.stopTalking()
-                })
-            },
-        verticalArrangement = Arrangement.Center,
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Icon(MapeIcons.Mic, null, tint = MapeColors.White, modifier = Modifier.size(40.dp))
-        Spacer(Modifier.height(4.dp))
-        Text(if (RadioManager.talking) "CORTAR" else "HABLAR", color = MapeColors.White, fontFamily = Outfit, fontWeight = FontWeight.Bold, fontSize = 15.sp, letterSpacing = 1.2.sp)
+private fun HoldTalkButton() {
+    val talking = RadioManager.talking
+    Box(contentAlignment = Alignment.Center) {
+        // Anillo exterior sutil: amplía la zona visual del botón.
+        Box(
+            Modifier.size(188.dp).clip(CircleShape)
+                .background(if (talking) MapeColors.RedSoftBg else MapeColors.Bg),
+        )
+        Column(
+            Modifier
+                .size(168.dp)
+                .clip(CircleShape)
+                .background(if (talking) MapeColors.Red else MapeColors.Ink)
+                .pointerInput(Unit) {
+                    detectTapGestures(onPress = {
+                        RadioManager.startTalking()
+                        tryAwaitRelease()
+                        RadioManager.stopTalking()
+                    })
+                },
+            verticalArrangement = Arrangement.Center,
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Icon(MapeIcons.Mic, null, tint = MapeColors.White, modifier = Modifier.size(52.dp))
+            Spacer(Modifier.height(6.dp))
+            Text(
+                if (talking) "CORTAR" else "HABLAR",
+                color = MapeColors.White, fontFamily = Outfit, fontWeight = FontWeight.Bold, fontSize = 16.sp, letterSpacing = 1.2.sp,
+            )
+        }
     }
 }
 

@@ -52,6 +52,13 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+
+    /** Al volver a la app, resincroniza la radio (reconecta/reconsume si el SO la
+     *  suspendió en 2º plano). Seguro aunque la radio no esté activa. */
+    override fun onResume() {
+        super.onResume()
+        runCatching { com.syemape.radio.data.RadioManager.ensureAlive() }
+    }
 }
 
 @Composable
