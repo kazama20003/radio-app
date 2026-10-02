@@ -122,7 +122,7 @@ fun RadioScreen(topPadding: Dp, bottomPadding: Dp = 0.dp, onOpenChannelChat: (St
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 RadioManager.connectedUsers.forEach { u ->
-                    val label = u.nickname ?: u.name ?: "—"
+                    val label = u.nickname ?: u.name ?: "Usuario"
                     Row(
                         Modifier.clip(CircleShape).background(MapeColors.Bg).padding(start = 5.dp, end = 14.dp, top = 5.dp, bottom = 5.dp),
                         verticalAlignment = Alignment.CenterVertically,

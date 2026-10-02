@@ -117,12 +117,11 @@ object RadioManager {
                 val count = o.optInt("count", members)
                 val arr = o.optJSONArray("users")
                 val list = if (arr != null) (0 until arr.length()).mapNotNull { i ->
-                    arr.optJSONObject(i)?.let {
-                        MiniUser(
-                            id = it.optString("id"),
-                            name = it.optString("name").takeIf { s -> s.isNotBlank() },
-                            nickname = it.optString("nickname").takeIf { s -> s.isNotBlank() },
-                        )
+                    arr.optJSONObject(i)?.let { obj ->
+                        // Android convierte el JSON null al texto "null": lo tratamos como null real.
+                        fun str(k: String): String? =
+                            if (obj.isNull(k)) null else obj.optString(k).takeIf { s -> s.isNotBlank() && s != "null" }
+                        MiniUser(id = obj.optString("id"), name = str("name"), nickname = str("nickname"))
                     }
                 } else null
                 ui.launch { members = count; if (list != null) connectedUsers = list }
@@ -163,10 +162,14 @@ object RadioManager {
                 ?: list.firstOrNull() ?: return@launch
             channelId = ch.id
             channelName = listOfNotNull(ch.name, ch.description).joinToString(" · ").ifBlank { "Canal" }
-            members = ch.memberCount
+            // NO sembramos con memberCount (miembros persistentes): el nº de conectados
+            // en vivo llega por channel:presence. Así no se muestra "4" en todos los canales.
+            members = 0
+            connectedUsers = emptyList()
             socket.emit("channel:join", ch.id)
             connected = true
             registerAudioCallback()
+            detectOutputLabel() // etiqueta de salida (Bluetooth/Auricular/Teléfono) ya al conectar
             RadioService.start(app, channelName)
             // Watchdog: mientras HAY voz activa, re-asienta modo/volumen que el
             // sistema puede resetear. En silencio no tocamos el audio del sistema
@@ -195,7 +198,7 @@ object RadioManager {
         Prefs.lastChannelId = id
         channels.firstOrNull { it.id == id }?.let { ch ->
             channelName = listOfNotNull(ch.name, ch.description).joinToString(" · ").ifBlank { "Canal" }
-            members = ch.memberCount
+            members = 0 // conectados reales llegan por channel:presence del canal nuevo
             connectedUsers = emptyList() // se repuebla con el channel:presence del canal nuevo
         }
         talking = false; remoteSpeaking = false; speakerLabel = null; txFailed = false
@@ -450,8 +453,8 @@ object RadioManager {
         val am = sysAudio ?: return
         if (audioCallback != null) return
         val cb = object : android.media.AudioDeviceCallback() {
-            override fun onAudioDevicesAdded(addedDevices: Array<out android.media.AudioDeviceInfo>?) { if (audioSessionActive) applyAudioRoute() }
-            override fun onAudioDevicesRemoved(removedDevices: Array<out android.media.AudioDeviceInfo>?) { if (audioSessionActive) applyAudioRoute() }
+            override fun onAudioDevicesAdded(addedDevices: Array<out android.media.AudioDeviceInfo>?) { if (audioSessionActive) applyAudioRoute() else detectOutputLabel() }
+            override fun onAudioDevicesRemoved(removedDevices: Array<out android.media.AudioDeviceInfo>?) { if (audioSessionActive) applyAudioRoute() else detectOutputLabel() }
         }
         audioCallback = cb
         runCatching { am.registerAudioDeviceCallback(cb, null) }
@@ -488,6 +491,30 @@ object RadioManager {
             // WebRTC reproduce por STREAM_VOICE_CALL en MODE_IN_COMMUNICATION:
             // aplica el volumen elegido por el usuario (persistido).
             applyStreamVolume()
+        }
+    }
+
+    /**
+     * Detecta y muestra la salida de audio (Bluetooth/Auricular/Teléfono) SIN tocar
+     * el modo ni el foco, para que la etiqueta sea correcta ya al conectar (no solo
+     * al hablar).
+     */
+    private fun detectOutputLabel() {
+        val am = sysAudio ?: return
+        if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.S) return
+        runCatching {
+            val devices = am.availableCommunicationDevices
+            fun has(vararg types: Int) = devices.any { it.type in types }
+            val label = when {
+                has(android.media.AudioDeviceInfo.TYPE_BLUETOOTH_SCO, android.media.AudioDeviceInfo.TYPE_BLE_HEADSET) -> "Bluetooth"
+                has(
+                    android.media.AudioDeviceInfo.TYPE_WIRED_HEADSET,
+                    android.media.AudioDeviceInfo.TYPE_WIRED_HEADPHONES,
+                    android.media.AudioDeviceInfo.TYPE_USB_HEADSET,
+                ) -> "Auricular"
+                else -> "Teléfono"
+            }
+            ui.launch { normalDeviceLabel = label }
         }
     }
 
