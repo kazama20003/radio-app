@@ -136,6 +136,37 @@ object MapeIcons {
         Part("M12 16l4-4"),
         Part(circlePath(12f, 16f, 1.3f), fill = true),
     )
+    // Adjuntar archivo (clip).
+    val Paperclip = buildIcon(
+        1.9f,
+        Part("M21 11.5l-8.6 8.6a5 5 0 0 1-7.1-7.1l8.6-8.6a3.3 3.3 0 0 1 4.7 4.7l-8.6 8.6a1.6 1.6 0 0 1-2.3-2.3l7.9-7.9"),
+    )
+    // Imagen / foto.
+    val Image = buildIcon(
+        1.8f,
+        Part(rrectPath(3f, 4f, 18f, 16f, 3f)),
+        Part(circlePath(8.5f, 9f, 1.6f)),
+        Part("M4 17l5-5 3 3 3-3 5 5"),
+    )
+    // Video / cámara.
+    val Video = buildIcon(
+        1.8f,
+        Part(rrectPath(3f, 6f, 13f, 12f, 3f)),
+        Part("M16 10l5-3v10l-5-3z"),
+    )
+    // Documento / archivo genérico.
+    val FileDoc = buildIcon(
+        1.8f,
+        Part("M6 3h8l5 5v13H6z"),
+        Part("M14 3v5h5"),
+        Part("M9 14h6M9 17.5h6"),
+    )
+    // Flecha de navegación (ir a / ruta).
+    val Navigation = buildIcon(2f, Part("M3 11l18-8-8 18-2-8-8-2z", fill = true))
+    // Descargar.
+    val Download = buildIcon(1.9f, Part("M12 3v12M8 11l4 4 4-4"), Part("M5 19h14"))
+    // Cerrar (X).
+    val Close = buildIcon(2.2f, Part("M6 6l12 12M18 6L6 18"))
     // Triángulo de alerta — severidad crítica / fallback.
     val AlertTriangle = buildIcon(
         1.9f,

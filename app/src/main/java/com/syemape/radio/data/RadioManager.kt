@@ -350,6 +350,7 @@ object RadioManager {
         acquireAudioSession() // toma el audio del sistema solo ahora que voy a hablar
         runCatching { audioManager?.enabled = true } // activa el micrófono ya
         beep(android.media.ToneGenerator.TONE_PROP_BEEP, 150) // pitido de inicio
+        RadioService.refresh(appRef) // notificación → "Cortar"
         worker.execute {
             fun fail() { ui.launch { talking = false; txFailed = true }; runCatching { audioManager?.enabled = false } }
             // Si se presionó HABLAR antes de que WebRTC/mediasoup terminara de armarse
@@ -376,6 +377,7 @@ object RadioManager {
         talking = false // instantáneo
         runCatching { audioManager?.enabled = false } // silencia el micrófono ya
         beep(android.media.ToneGenerator.TONE_PROP_BEEP2, 120) // pitido "roger" al soltar
+        RadioService.refresh(appRef) // notificación → "Hablar"
         worker.execute {
             runCatching { producer?.close() }
             producer = null

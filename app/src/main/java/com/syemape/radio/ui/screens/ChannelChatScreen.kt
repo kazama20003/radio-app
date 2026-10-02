@@ -1,5 +1,10 @@
 package com.syemape.radio.ui.screens
 
+import android.content.Intent
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -10,6 +15,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
@@ -19,6 +25,8 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -34,14 +42,19 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import coil.compose.AsyncImage
 import com.syemape.radio.BuildConfig
 import com.syemape.radio.data.Backend
 import com.syemape.radio.data.Fmt
+import com.syemape.radio.data.MediaUploader
 import com.syemape.radio.data.RadioTransmission
 import com.syemape.radio.data.Realtime
 import com.syemape.radio.data.SessionManager
@@ -51,40 +64,106 @@ import com.syemape.radio.ui.theme.MapeColors
 import com.syemape.radio.ui.theme.Outfit
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.json.JSONObject
 
 private fun RadioTransmission.preview(): String = when {
     !text.isNullOrBlank() -> text
     audioKey != null -> "🎤 Nota de voz" + (durationSec?.let { " · ${it.toInt()}s" } ?: "")
     imageKey != null -> "📷 Imagen"
+    videoKey != null -> "🎬 Video"
+    fileKey != null -> "📎 " + (fileName ?: "Archivo")
     else -> ""
 }
 
 /** Origen del backend (sin /api) para construir URLs de archivos servidos. */
 private val mediaOrigin: String = BuildConfig.API_BASE_URL.substringBefore("/api")
 
-/** URL completa de una nota de voz a partir de su key (`/uploads/...`). */
-private fun audioUrlOf(key: String?): String? = when {
+/** URL completa de un archivo a partir de su key (`/uploads/...`). */
+private fun urlOf(key: String?): String? = when {
     key.isNullOrBlank() -> null
     key.startsWith("http") -> key
     key.startsWith("/") -> mediaOrigin + key
     else -> null
 }
 
+/** Tamaño legible (p.ej. "3.2 MB"). */
+private fun humanSize(bytes: Long?): String {
+    if (bytes == null || bytes <= 0) return ""
+    val kb = bytes / 1024.0
+    if (kb < 1024) return "${kb.toInt()} KB"
+    val mb = kb / 1024.0
+    return String.format("%.1f MB", mb)
+}
+
+private const val MAX_UPLOAD_BYTES = 100L * 1024 * 1024 // 100 MB (igual que el backend)
+
 @Composable
 fun ChannelChatScreen(channelId: String, title: String, topPadding: Dp, bottomPadding: Dp, onBack: () -> Unit) {
     val meId = SessionManager.user?.id
+    val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val items = remember { mutableStateListOf<RadioTransmission>() }
     var draft by remember { mutableStateOf("") }
     val listState = rememberLazyListState()
+
+    var uploading by remember { mutableStateOf(false) }
+    var attachMenu by remember { mutableStateOf(false) }
+    var fullscreenImage by remember { mutableStateOf<String?>(null) }
+
+    fun toast(msg: String) = android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_SHORT).show()
+
+    // Abre un archivo (video/documento) con una app externa (navegador/reproductor).
+    fun openExternally(key: String?) {
+        val url = urlOf(key) ?: return
+        runCatching {
+            context.startActivity(
+                Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+            )
+        }.onFailure { toast("No se pudo abrir el archivo") }
+    }
+
+    // Sube un adjunto elegido y lo publica en el canal.
+    fun sendMedia(uri: Uri) {
+        val picked = runCatching { MediaUploader.query(context, uri) }.getOrNull() ?: return
+        if (picked.size in 1..Long.MAX_VALUE && picked.size > MAX_UPLOAD_BYTES) {
+            toast("Archivo muy grande (máx 100 MB)")
+            return
+        }
+        scope.launch {
+            uploading = true
+            val res = withContext(Dispatchers.IO) {
+                runCatching { MediaUploader.upload(context, picked) }.getOrNull()
+            }
+            uploading = false
+            if (res == null) { toast("No se pudo subir el archivo"); return@launch }
+            val kind = MediaUploader.kindOf(picked.mime)
+            Realtime.socket("/radio").emit(
+                "channel:media",
+                JSONObject()
+                    .put("channelId", channelId)
+                    .put("kind", kind)
+                    .put("key", res.key)
+                    .put("fileName", picked.name)
+                    .put("fileSize", if (picked.size > 0) picked.size else (res.size ?: 0))
+                    .put("mimeType", picked.mime),
+            )
+        }
+    }
+
+    val pickMedia = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+        if (uri != null) sendMedia(uri)
+    }
+    val pickFile = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) sendMedia(uri)
+    }
 
     // Reproductor de notas de voz (uno compartido; playingId = burbuja sonando).
     val player = remember { android.media.MediaPlayer() }
     var playingId by remember { mutableStateOf<String?>(null) }
     DisposableEffect(Unit) { onDispose { runCatching { player.release() } } }
     fun toggleVoice(t: RadioTransmission) {
-        val url = audioUrlOf(t.audioKey) ?: return
+        val url = urlOf(t.audioKey) ?: return
         if (playingId == t.id) { // ya sonando esta → pausar/detener
             runCatching { player.stop() }
             playingId = null
@@ -120,7 +199,7 @@ fun ChannelChatScreen(channelId: String, title: String, topPadding: Dp, bottomPa
         // Asegura estar en la sala del canal para recibir eventos en vivo.
         if (!socket.connected()) socket.connect()
         socket.emit("channel:join", channelId)
-        // Añade una transmisión (texto/imagen vía channel:post, o nota de voz vía ptt:ended).
+        // Añade una transmisión (texto/imagen/media vía channel:post, o nota de voz vía ptt:ended).
         val addFromEvent = io.socket.emitter.Emitter.Listener { args ->
             val o = args.firstOrNull() as? JSONObject ?: return@Listener
             if (o.optString("channelId") != channelId) return@Listener
@@ -129,7 +208,7 @@ fun ChannelChatScreen(channelId: String, title: String, topPadding: Dp, bottomPa
                 ?: return@Listener
             scope.launch(Dispatchers.Main) { if (items.none { it.id == t.id }) items.add(t) }
         }
-        socket.on("channel:post", addFromEvent) // texto / imagen
+        socket.on("channel:post", addFromEvent) // texto / imagen / video / archivo
         socket.on("ptt:ended", addFromEvent)    // nota de voz grabada
         onDispose { socket.off("channel:post", addFromEvent); socket.off("ptt:ended", addFromEvent) }
     }
@@ -165,32 +244,12 @@ fun ChannelChatScreen(channelId: String, title: String, topPadding: Dp, bottomPa
                             Text(t.sender?.nickname ?: t.sender?.name ?: "—", color = MapeColors.Red, fontFamily = Outfit, fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
                             Spacer(Modifier.height(2.dp))
                         }
-                        if (t.audioKey != null) {
-                            val playing = playingId == t.id
-                            Row(
-                                Modifier.pressScale { toggleVoice(t) },
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                            ) {
-                                Box(
-                                    Modifier.size(34.dp).clip(CircleShape).background(if (mine) MapeColors.White else MapeColors.Ink),
-                                    contentAlignment = Alignment.Center,
-                                ) {
-                                    Icon(
-                                        if (playing) MapeIcons.Pause else MapeIcons.Play,
-                                        null,
-                                        tint = if (mine) MapeColors.Ink else MapeColors.White,
-                                        modifier = Modifier.size(16.dp),
-                                    )
-                                }
-                                Text(
-                                    "Nota de voz" + (t.durationSec?.let { " · ${it.toInt()}s" } ?: ""),
-                                    color = if (mine) MapeColors.White else MapeColors.Ink,
-                                    fontFamily = Outfit, fontWeight = FontWeight.Medium, fontSize = 15.sp,
-                                )
-                            }
-                        } else {
-                            Text(t.preview(), color = if (mine) MapeColors.White else MapeColors.Ink, fontFamily = Outfit, fontSize = 15.sp)
+                        when {
+                            t.audioKey != null -> VoiceBubble(t, mine, playingId == t.id) { toggleVoice(t) }
+                            t.imageKey != null -> ImageBubble(urlOf(t.imageKey)) { urlOf(t.imageKey)?.let { fullscreenImage = it } }
+                            t.videoKey != null -> MediaCard(MapeIcons.Video, "Video", t.fileName ?: "Toca para reproducir", t.fileSize, mine) { openExternally(t.videoKey) }
+                            t.fileKey != null -> MediaCard(MapeIcons.FileDoc, t.fileName ?: "Archivo", "Toca para abrir", t.fileSize, mine) { openExternally(t.fileKey) }
+                            else -> Text(t.preview(), color = if (mine) MapeColors.White else MapeColors.Ink, fontFamily = Outfit, fontSize = 15.sp)
                         }
                         Text(Fmt.shortTime(t.createdAt), color = if (mine) MapeColors.TextOnDark else MapeColors.TextFaint, fontFamily = Outfit, fontSize = 10.sp, modifier = Modifier.padding(top = 3.dp).align(Alignment.End))
                     }
@@ -201,10 +260,43 @@ fun ChannelChatScreen(channelId: String, title: String, topPadding: Dp, bottomPa
         Row(
             Modifier.fillMaxWidth().background(MapeColors.White).padding(horizontal = 12.dp, vertical = 10.dp).padding(bottom = bottomPadding),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
+            // Botón adjuntar (foto/video o archivo). Muestra spinner mientras sube.
+            Box {
+                Box(
+                    Modifier.size(44.dp).clip(CircleShape).background(MapeColors.Bg).pressScale(enabled = !uploading) { attachMenu = true },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    if (uploading) {
+                        androidx.compose.material3.CircularProgressIndicator(
+                            modifier = Modifier.size(20.dp), strokeWidth = 2.dp, color = MapeColors.Ink,
+                        )
+                    } else {
+                        Icon(MapeIcons.Paperclip, null, tint = MapeColors.Ink, modifier = Modifier.size(22.dp))
+                    }
+                }
+                DropdownMenu(expanded = attachMenu, onDismissRequest = { attachMenu = false }) {
+                    DropdownMenuItem(
+                        text = { Text("Foto o video", fontFamily = Outfit) },
+                        leadingIcon = { Icon(MapeIcons.Image, null, modifier = Modifier.size(20.dp)) },
+                        onClick = {
+                            attachMenu = false
+                            pickMedia.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo))
+                        },
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Archivo", fontFamily = Outfit) },
+                        leadingIcon = { Icon(MapeIcons.FileDoc, null, modifier = Modifier.size(20.dp)) },
+                        onClick = {
+                            attachMenu = false
+                            runCatching { pickFile.launch(arrayOf("*/*")) }
+                        },
+                    )
+                }
+            }
             Box(
-                Modifier.weight(1f).height(48.dp).clip(CircleShape).background(MapeColors.Bg).padding(horizontal = 16.dp),
+                Modifier.weight(1f).heightIn(min = 48.dp).clip(CircleShape).background(MapeColors.Bg).padding(horizontal = 16.dp, vertical = 12.dp),
                 contentAlignment = Alignment.CenterStart,
             ) {
                 if (draft.isEmpty()) Text("Mensaje al canal…", color = MapeColors.TextFaint, fontFamily = Outfit, fontSize = 15.sp)
@@ -225,6 +317,88 @@ fun ChannelChatScreen(channelId: String, title: String, topPadding: Dp, bottomPa
                 },
                 contentAlignment = Alignment.Center,
             ) { Icon(MapeIcons.Send, null, tint = MapeColors.White, modifier = Modifier.size(20.dp)) }
+        }
+    }
+
+    // Visor de imagen a pantalla completa.
+    fullscreenImage?.let { url ->
+        Dialog(onDismissRequest = { fullscreenImage = null }) {
+            Box(Modifier.fillMaxSize().pressScale { fullscreenImage = null }, contentAlignment = Alignment.Center) {
+                AsyncImage(
+                    model = url, contentDescription = null,
+                    contentScale = ContentScale.Fit,
+                    modifier = Modifier.fillMaxWidth().padding(8.dp),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun VoiceBubble(t: RadioTransmission, mine: Boolean, playing: Boolean, onToggle: () -> Unit) {
+    Row(
+        Modifier.pressScale { onToggle() },
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Box(
+            Modifier.size(34.dp).clip(CircleShape).background(if (mine) MapeColors.White else MapeColors.Ink),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                if (playing) MapeIcons.Pause else MapeIcons.Play,
+                null,
+                tint = if (mine) MapeColors.Ink else MapeColors.White,
+                modifier = Modifier.size(16.dp),
+            )
+        }
+        Text(
+            "Nota de voz" + (t.durationSec?.let { " · ${it.toInt()}s" } ?: ""),
+            color = if (mine) MapeColors.White else MapeColors.Ink,
+            fontFamily = Outfit, fontWeight = FontWeight.Medium, fontSize = 15.sp,
+        )
+    }
+}
+
+@Composable
+private fun ImageBubble(url: String?, onClick: () -> Unit) {
+    AsyncImage(
+        model = url,
+        contentDescription = "Imagen",
+        contentScale = ContentScale.Crop,
+        modifier = Modifier
+            .widthIn(max = 230.dp)
+            .heightIn(max = 260.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .pressScale { onClick() },
+    )
+}
+
+@Composable
+private fun MediaCard(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    titleText: String,
+    subtitle: String,
+    size: Long?,
+    mine: Boolean,
+    onClick: () -> Unit,
+) {
+    val fg = if (mine) MapeColors.White else MapeColors.Ink
+    Row(
+        Modifier.widthIn(max = 240.dp).pressScale { onClick() },
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Box(
+            Modifier.size(40.dp).clip(RoundedCornerShape(10.dp)).background(if (mine) MapeColors.White else MapeColors.Ink),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(icon, null, tint = if (mine) MapeColors.Ink else MapeColors.White, modifier = Modifier.size(22.dp))
+        }
+        Column {
+            Text(titleText, color = fg, fontFamily = Outfit, fontWeight = FontWeight.SemiBold, fontSize = 15.sp, maxLines = 1)
+            val sub = humanSize(size).let { if (it.isBlank()) subtitle else "$subtitle · $it" }
+            Text(sub, color = if (mine) MapeColors.TextOnDark else MapeColors.TextMuted, fontFamily = Outfit, fontSize = 12.sp, maxLines = 1)
         }
     }
 }

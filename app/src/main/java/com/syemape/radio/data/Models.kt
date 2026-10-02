@@ -171,9 +171,47 @@ data class RadioTransmission(
     val text: String? = null,
     val audioKey: String? = null,
     val imageKey: String? = null,
+    val videoKey: String? = null,
+    val fileKey: String? = null,
+    val fileName: String? = null,
+    val fileSize: Long? = null,
+    val mimeType: String? = null,
     val durationSec: Double? = null,
     val createdAt: String? = null,
     val sender: MiniUser? = null,
+)
+
+/** Respuesta de `POST /api/media/upload`. */
+data class MediaUpload(
+    val key: String = "",
+    val url: String = "",
+    val mime: String? = null,
+    val size: Long? = null,
+)
+
+/** Resultado de `GET /api/maps/directions` (proxy a Google Directions). */
+data class DirectionsResult(
+    val ok: Boolean = false,
+    val distanceText: String? = null,
+    val distanceMeters: Int? = null,
+    val durationText: String? = null,
+    val durationSeconds: Int? = null,
+    val overviewPolyline: String? = null,
+    val endAddress: String? = null,
+    val steps: List<DirectionsStep> = emptyList(),
+)
+
+data class DirectionsStep(
+    val instruction: String = "",
+    val distanceText: String? = null,
+    val distanceMeters: Int? = null,
+    val durationText: String? = null,
+    val polyline: String? = null,
+    val maneuver: String? = null,
+    val startLat: Double? = null,
+    val startLng: Double? = null,
+    val endLat: Double? = null,
+    val endLng: Double? = null,
 )
 
 /** Posición de unidad recibida en vivo (position:update). */

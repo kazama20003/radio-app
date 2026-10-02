@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
@@ -25,16 +26,20 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.google.android.gms.maps.model.LatLng
 import com.syemape.radio.data.Backend
+import com.syemape.radio.data.DirectionsResult
 import com.syemape.radio.data.LivePerson
 import com.syemape.radio.data.SessionManager
 import com.syemape.radio.ui.Avatar
@@ -48,13 +53,49 @@ import com.syemape.radio.ui.pressScale
 import com.syemape.radio.ui.rememberAsync
 import com.syemape.radio.ui.theme.MapeColors
 import com.syemape.radio.ui.theme.Outfit
+import kotlinx.coroutines.launch
+
+/** Decodifica una polilínea codificada de Google en una lista de puntos. */
+private fun decodePolyline(encoded: String): List<LatLng> {
+    val poly = ArrayList<LatLng>()
+    var index = 0
+    val len = encoded.length
+    var lat = 0
+    var lng = 0
+    while (index < len) {
+        var b: Int
+        var shift = 0
+        var result = 0
+        do {
+            b = encoded[index++].code - 63
+            result = result or ((b and 0x1f) shl shift)
+            shift += 5
+        } while (b >= 0x20)
+        val dlat = if (result and 1 != 0) (result shr 1).inv() else result shr 1
+        lat += dlat
+        shift = 0
+        result = 0
+        do {
+            b = encoded[index++].code - 63
+            result = result or ((b and 0x1f) shl shift)
+            shift += 5
+        } while (b >= 0x20)
+        val dlng = if (result and 1 != 0) (result shr 1).inv() else result shr 1
+        lng += dlng
+        poly.add(LatLng(lat / 1e5, lng / 1e5))
+    }
+    return poly
+}
 
 @Composable
 fun MapScreen(topPadding: Dp) {
     var filter by remember { mutableIntStateOf(0) }
     var selectedId by remember { mutableStateOf<String?>(null) }
     val user = SessionManager.user
+    val meId = user?.id
     val firstName = (user?.nickname ?: user?.name)?.trim()?.split(" ")?.firstOrNull()?.replaceFirstChar { it.uppercase() } ?: "operador"
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
 
     val summaryRes by rememberAsync { Backend.api.unitsSummary() }
     val metricsRes by rememberAsync { Backend.api.alertMetrics() }
@@ -63,6 +104,42 @@ fun MapScreen(topPadding: Dp) {
     // Estado en vivo (socket + FusedLocation) desde TrackingManager.
     val people = com.syemape.radio.data.TrackingManager.people.values.toList()
     val units = com.syemape.radio.data.TrackingManager.units.values.toList()
+
+    // ---- Estado de la ruta/navegación ----
+    var routeFor by remember { mutableStateOf<String?>(null) } // id del destino con ruta activa
+    var routePoints by remember { mutableStateOf<List<LatLng>>(emptyList()) }
+    var routeInfo by remember { mutableStateOf<DirectionsResult?>(null) }
+    var routing by remember { mutableStateOf(false) }
+    var showSteps by remember { mutableStateOf(false) }
+
+    fun toast(msg: String) = android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_SHORT).show()
+
+    fun clearRoute() {
+        routeFor = null; routePoints = emptyList(); routeInfo = null; showSteps = false
+    }
+
+    fun navigateTo(target: LivePerson) {
+        val me = people.firstOrNull { it.id == meId }
+        val oLat = me?.lastLat
+        val oLng = me?.lastLng
+        if (oLat == null || oLng == null) { toast("Aún no tenemos tu ubicación"); return }
+        val dLat = target.lastLat
+        val dLng = target.lastLng
+        if (dLat == null || dLng == null) { toast("Ese operador no tiene ubicación"); return }
+        scope.launch {
+            routing = true
+            val res = runCatching { Backend.api.directions(oLat, oLng, dLat, dLng) }.getOrNull()
+            routing = false
+            if (res == null || !res.ok || res.overviewPolyline.isNullOrBlank()) {
+                toast("No se pudo trazar la ruta"); return@launch
+            }
+            routePoints = decodePolyline(res.overviewPolyline!!)
+            routeInfo = res
+            routeFor = target.id
+        }
+    }
+
+    val selectedPerson = people.firstOrNull { it.id == selectedId }
 
     Column(
         modifier = Modifier.fillMaxSize().background(MapeColors.Bg).padding(top = topPadding + 20.dp),
@@ -116,7 +193,23 @@ fun MapScreen(topPadding: Dp) {
         Spacer(Modifier.height(14.dp))
 
         // ---- Mapa grande e interactivo (se puede panear/hacer zoom) ----
-        MapPreview(people, units, selectedId, user?.id, Modifier.fillMaxWidth().weight(1f).padding(horizontal = 24.dp))
+        MapPreview(
+            people, units, selectedId, meId, routePoints,
+            onMarkerClick = { selectedId = it },
+            Modifier.fillMaxWidth().weight(1f).padding(horizontal = 24.dp),
+        )
+
+        // ---- Panel de navegación hacia el operador seleccionado ----
+        if (selectedPerson != null && selectedPerson.id != meId) {
+            NavPanel(
+                target = selectedPerson,
+                routing = routing,
+                route = if (routeFor == selectedPerson.id) routeInfo else null,
+                onNavigate = { navigateTo(selectedPerson) },
+                onShowSteps = { showSteps = true },
+                onCancel = { clearRoute() },
+            )
+        }
 
         Spacer(Modifier.height(12.dp))
 
@@ -141,7 +234,116 @@ fun MapScreen(topPadding: Dp) {
                 }
             }
             items(people) { p ->
-                PersonCard(p, p.id == user?.id, selected = p.id == selectedId) { selectedId = p.id }
+                PersonCard(p, p.id == meId, selected = p.id == selectedId) { selectedId = p.id }
+            }
+        }
+    }
+
+    // ---- Indicaciones paso a paso ----
+    if (showSteps) {
+        routeInfo?.let { info ->
+            StepsSheet(info, onClose = { showSteps = false })
+        }
+    }
+}
+
+@Composable
+private fun NavPanel(
+    target: LivePerson,
+    routing: Boolean,
+    route: DirectionsResult?,
+    onNavigate: () -> Unit,
+    onShowSteps: () -> Unit,
+    onCancel: () -> Unit,
+) {
+    val name = target.nickname?.takeIf { it.isNotBlank() } ?: target.name ?: "Operador"
+    Row(
+        Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 10.dp)
+            .clip(RoundedCornerShape(18.dp)).background(MapeColors.Ink).padding(horizontal = 14.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(
+                if (route != null) "Ruta a $name" else "Ir a $name",
+                color = MapeColors.White, fontFamily = Outfit, fontWeight = FontWeight.SemiBold, fontSize = 15.sp, maxLines = 1,
+            )
+            Text(
+                when {
+                    routing -> "Calculando ruta…"
+                    route != null -> listOfNotNull(route.distanceText, route.durationText).joinToString(" · ").ifBlank { "Ruta lista" }
+                    else -> "Trazar camino por carretera"
+                },
+                color = MapeColors.TextOnDark, fontFamily = Outfit, fontSize = 12.sp, maxLines = 1,
+            )
+        }
+        if (route != null) {
+            // Ver indicaciones
+            Box(
+                Modifier.size(44.dp).clip(CircleShape).background(MapeColors.White).pressScale { onShowSteps() },
+                contentAlignment = Alignment.Center,
+            ) { Icon(MapeIcons.Sliders, null, tint = MapeColors.Ink, modifier = Modifier.size(20.dp)) }
+            // Cancelar ruta
+            Box(
+                Modifier.size(44.dp).clip(CircleShape).background(MapeColors.Red).pressScale { onCancel() },
+                contentAlignment = Alignment.Center,
+            ) { Icon(MapeIcons.Close, null, tint = MapeColors.White, modifier = Modifier.size(20.dp)) }
+        } else {
+            Row(
+                Modifier.clip(CircleShape).background(MapeColors.Red).pressScale(enabled = !routing) { onNavigate() }
+                    .padding(horizontal = 16.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                Icon(MapeIcons.Navigation, null, tint = MapeColors.White, modifier = Modifier.size(18.dp))
+                Text("Ir", color = MapeColors.White, fontFamily = Outfit, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+            }
+        }
+    }
+}
+
+@Composable
+private fun StepsSheet(info: DirectionsResult, onClose: () -> Unit) {
+    androidx.compose.ui.window.Dialog(onDismissRequest = onClose) {
+        Column(
+            Modifier.fillMaxWidth().heightIn(max = 520.dp).clip(RoundedCornerShape(22.dp)).background(MapeColors.White).padding(18.dp),
+        ) {
+            Row(
+                Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Column {
+                    Text("Indicaciones", color = MapeColors.Ink, fontFamily = Outfit, fontWeight = FontWeight.SemiBold, fontSize = 18.sp)
+                    Text(
+                        listOfNotNull(info.distanceText, info.durationText).joinToString(" · "),
+                        color = MapeColors.TextMuted, fontFamily = Outfit, fontSize = 13.sp,
+                    )
+                }
+                Box(
+                    Modifier.size(38.dp).clip(CircleShape).background(MapeColors.Bg).pressScale { onClose() },
+                    contentAlignment = Alignment.Center,
+                ) { Icon(MapeIcons.Close, null, tint = MapeColors.Ink, modifier = Modifier.size(18.dp)) }
+            }
+            Spacer(Modifier.height(10.dp))
+            LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                items(info.steps) { step ->
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        Box(
+                            Modifier.size(34.dp).clip(CircleShape).background(MapeColors.Bg),
+                            contentAlignment = Alignment.Center,
+                        ) { Icon(MapeIcons.Navigation, null, tint = MapeColors.Ink, modifier = Modifier.size(16.dp)) }
+                        Column(Modifier.weight(1f)) {
+                            Text(step.instruction, color = MapeColors.Ink, fontFamily = Outfit, fontSize = 14.sp)
+                            if (!step.distanceText.isNullOrBlank()) {
+                                Text(step.distanceText!!, color = MapeColors.TextMuted, fontFamily = Outfit, fontSize = 12.sp)
+                            }
+                        }
+                    }
+                }
             }
         }
     }
@@ -149,7 +351,15 @@ fun MapScreen(topPadding: Dp) {
 
 @OptIn(com.google.maps.android.compose.MapsComposeExperimentalApi::class)
 @Composable
-private fun MapPreview(people: List<LivePerson>, units: List<com.syemape.radio.data.UnitPosition>, selectedId: String?, meId: String?, boxModifier: Modifier) {
+private fun MapPreview(
+    people: List<LivePerson>,
+    units: List<com.syemape.radio.data.UnitPosition>,
+    selectedId: String?,
+    meId: String?,
+    routePoints: List<LatLng>,
+    onMarkerClick: (String) -> Unit,
+    boxModifier: Modifier,
+) {
     val located = people.filter { it.lastLat != null && it.lastLng != null }
     val firstUnit = units.firstOrNull { it.lat != null && it.lng != null }
     val firstLat = located.firstOrNull()?.lastLat ?: firstUnit?.lat
@@ -173,13 +383,27 @@ private fun MapPreview(people: List<LivePerson>, units: List<com.syemape.radio.d
     val selected = located.firstOrNull { it.id == selectedId }
     // Al seleccionar un operador: vuela la cámara a su posición.
     LaunchedEffect(selectedId, selected?.lastLat, selected?.lastLng) {
-        if (selected?.lastLat != null && selected.lastLng != null) {
+        if (routePoints.isEmpty() && selected?.lastLat != null && selected.lastLng != null) {
             camera.animate(
                 com.google.android.gms.maps.CameraUpdateFactory.newLatLngZoom(
                     com.google.android.gms.maps.model.LatLng(selected.lastLat, selected.lastLng), 16.5f,
                 ),
                 700,
             )
+        }
+    }
+
+    // Al trazar una ruta: encuadra toda la ruta en la cámara.
+    LaunchedEffect(routePoints) {
+        if (routePoints.size >= 2) {
+            val b = com.google.android.gms.maps.model.LatLngBounds.Builder()
+            routePoints.forEach { b.include(it) }
+            runCatching {
+                camera.animate(
+                    com.google.android.gms.maps.CameraUpdateFactory.newLatLngBounds(b.build(), 120),
+                    800,
+                )
+            }
         }
     }
 
@@ -191,6 +415,13 @@ private fun MapPreview(people: List<LivePerson>, units: List<com.syemape.radio.d
             cameraPositionState = camera,
             uiSettings = com.google.maps.android.compose.MapUiSettings(zoomControlsEnabled = false, mapToolbarEnabled = false),
         ) {
+            if (routePoints.size >= 2) {
+                com.google.maps.android.compose.Polyline(
+                    points = routePoints,
+                    color = MapeColors.Red,
+                    width = 14f,
+                )
+            }
             located.forEach { p ->
                 val pos = com.google.android.gms.maps.model.LatLng(p.lastLat!!, p.lastLng!!)
                 val st = com.google.maps.android.compose.rememberMarkerState(key = p.id, position = pos)
@@ -200,6 +431,7 @@ private fun MapPreview(people: List<LivePerson>, units: List<com.syemape.radio.d
                     state = st,
                     title = p.nickname?.takeIf { it.isNotBlank() } ?: p.name ?: "Operador",
                     anchor = androidx.compose.ui.geometry.Offset(0.5f, 1f),
+                    onClick = { onMarkerClick(p.id); true },
                 ) {
                     OperatorMarker(p, selected = p.id == selectedId, isMe = p.id == meId)
                 }

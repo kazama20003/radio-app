@@ -28,6 +28,22 @@ class RadioService : Service() {
             stopSelf()
             return START_NOT_STICKY
         }
+        // Botón "Hablar"/"Cortar" de la notificación: transmite en el CANAL ACTUAL.
+        // Es un toggle (la notificación no permite mantener pulsado): 1er toque empieza,
+        // 2.º corta. Reutiliza exactamente el mismo camino PTT que el botón de la app.
+        if (intent?.action == ACTION_TALK) {
+            val rm = com.syemape.radio.data.RadioManager
+            when {
+                rm.channelId == null ->
+                    android.widget.Toast.makeText(this, "Entra a un canal para hablar", android.widget.Toast.LENGTH_SHORT).show()
+                rm.talking -> rm.stopTalking()
+                rm.remoteSpeaking ->
+                    android.widget.Toast.makeText(this, "Espera, alguien está hablando", android.widget.Toast.LENGTH_SHORT).show()
+                else -> rm.startTalking()
+            }
+            refresh(this) // re-postea la notificación con el estado nuevo (Hablar/Cortar)
+            return START_STICKY
+        }
         val channel = intent?.getStringExtra(EXTRA_CHANNEL) ?: "Canal"
         startForegroundCompat(channel)
         acquireWakeLock()
@@ -98,6 +114,7 @@ class RadioService : Service() {
         const val CHANNEL_ID = "mape_radio"
         const val EXTRA_CHANNEL = "channel"
         const val ACTION_STOP = "com.syemape.radio.STOP_RADIO"
+        const val ACTION_TALK = "com.syemape.radio.TALK_RADIO"
 
         private fun ensureChannel(context: Context) {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -126,20 +143,45 @@ class RadioService : Service() {
                 context, 1, stopIntent,
                 android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE,
             )
+            // Botón PTT en la notificación (toggle): habla en el canal actual.
+            val talkIntent = Intent(context, RadioService::class.java).setAction(ACTION_TALK)
+            val talkPi = android.app.PendingIntent.getService(
+                context, 2, talkIntent,
+                android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE,
+            )
+            val talking = com.syemape.radio.data.RadioManager.talking
             return NotificationCompat.Builder(context, CHANNEL_ID)
                 .setSmallIcon(com.syemape.radio.R.drawable.ic_stat_radio)
                 .setColor(0xFFE5322D.toInt())
                 .apply { if (logo != null) setLargeIcon(logo) }
                 .setContentTitle(channelText)
-                .setContentText("Radio en vivo · tu equipo te escucha")
+                .setContentText(
+                    if (talking) "🔴 Transmitiendo… toca Cortar para terminar"
+                    else "Radio en vivo · toca Hablar para transmitir",
+                )
                 .setOngoing(true)
                 .setSilent(true)
                 .setShowWhen(false)
                 .setPriority(NotificationCompat.PRIORITY_LOW)
                 .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
                 .setContentIntent(pi)
+                .addAction(
+                    com.syemape.radio.R.drawable.ic_stat_radio,
+                    if (talking) "Cortar" else "Hablar",
+                    talkPi,
+                )
                 .addAction(com.syemape.radio.R.drawable.ic_stat_radio, "Desconectar", stopPi)
                 .build()
+        }
+
+        /** Re-postea la notificación con el estado actual (p.ej. Hablar ↔ Cortar). */
+        fun refresh(context: Context?) {
+            context ?: return
+            ensureChannel(context)
+            val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            runCatching {
+                nm.notify(NOTIF_ID, buildNotification(context, com.syemape.radio.data.RadioManager.channelName))
+            }
         }
 
         fun start(context: Context?, channelText: String) {

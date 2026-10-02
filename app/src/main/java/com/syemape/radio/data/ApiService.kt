@@ -1,10 +1,14 @@
 package com.syemape.radio.data
 
+import okhttp3.MultipartBody
 import retrofit2.http.Body
 import retrofit2.http.GET
+import retrofit2.http.Multipart
 import retrofit2.http.PATCH
 import retrofit2.http.POST
+import retrofit2.http.Part
 import retrofit2.http.Path
+import retrofit2.http.Query
 
 /** Interfaz Retrofit del backend Mape (REST bajo /api). */
 interface ApiService {
@@ -76,4 +80,19 @@ interface ApiService {
 
     @POST("conversations/{id}/read")
     suspend fun markRead(@Path("id") id: String)
+
+    /** Sube un archivo (imagen/video/documento) y devuelve su key en `/uploads`. */
+    @Multipart
+    @POST("media/upload")
+    suspend fun uploadMedia(@Part file: MultipartBody.Part): MediaUpload
+
+    /** Ruta de navegación por carretera hacia un punto (proxy a Google Directions). */
+    @GET("maps/directions")
+    suspend fun directions(
+        @Query("originLat") originLat: Double,
+        @Query("originLng") originLng: Double,
+        @Query("destLat") destLat: Double,
+        @Query("destLng") destLng: Double,
+        @Query("mode") mode: String = "driving",
+    ): DirectionsResult
 }

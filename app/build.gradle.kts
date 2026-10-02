@@ -88,6 +88,9 @@ dependencies {
         exclude(group = "org.json", module = "json")
     }
 
+    // Carga de imágenes (miniaturas del chat) en Compose
+    implementation("io.coil-kt:coil-compose:2.7.0")
+
     // Google Maps
     implementation("com.google.android.gms:play-services-maps:19.2.0")
     implementation("com.google.android.gms:play-services-location:21.3.0")
