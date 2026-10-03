@@ -259,6 +259,7 @@ fun RadioScreen(topPadding: Dp, bottomPadding: Dp = 0.dp, onOpenChannelChat: (St
 @Composable
 private fun HoldTalkButton() {
     val talking = RadioManager.talking
+    val ready = RadioManager.connected // true solo cuando el canal de audio está listo
     Box(contentAlignment = Alignment.Center) {
         // Anillo exterior sutil: amplía la zona visual del botón.
         Box(
@@ -269,7 +270,13 @@ private fun HoldTalkButton() {
             Modifier
                 .size(168.dp)
                 .clip(CircleShape)
-                .background(if (talking) MapeColors.Red else MapeColors.Ink)
+                .background(
+                    when {
+                        talking -> MapeColors.Red
+                        !ready -> MapeColors.TextMuted // apagado: aún conectando
+                        else -> MapeColors.Ink
+                    },
+                )
                 .pointerInput(Unit) {
                     // PTT a prueba de cancelación: empieza al tocar y SOLO termina cuando se
                     // levanta el dedo de verdad. Antes, con detectTapGestures, las recomposiciones
@@ -294,7 +301,11 @@ private fun HoldTalkButton() {
             Icon(MapeIcons.Mic, null, tint = MapeColors.White, modifier = Modifier.size(52.dp))
             Spacer(Modifier.height(6.dp))
             Text(
-                if (talking) "CORTAR" else "HABLAR",
+                when {
+                    talking -> "CORTAR"
+                    !ready -> "CONECTANDO…"
+                    else -> "HABLAR"
+                },
                 color = MapeColors.White, fontFamily = Outfit, fontWeight = FontWeight.Bold, fontSize = 16.sp, letterSpacing = 1.2.sp,
             )
         }
