@@ -406,6 +406,9 @@ object RadioManager {
         // Marcar listo solo cuando ambos transports quedaron armados (si no, se reintenta).
         setupDone = sendTransport != null && recvTransport != null
         android.util.Log.d(TAG, "setupMediasoup ${System.currentTimeMillis() - t0}ms send=${sendTransport != null} recv=${recvTransport != null}")
+        // EN VIVO apenas los transportes están listos: ya se puede oír/hablar. No esperamos
+        // al ms:getProducer de abajo (ver quién habla), que es extra y podría tardar.
+        if (setupDone) ui.launch { connected = isChannelReady() }
 
         // consumir al hablante actual si hay
         val cur = ack("ms:getProducer", JSONObject().put("channelId", cid)) as? JSONObject
