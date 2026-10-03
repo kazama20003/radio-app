@@ -648,7 +648,16 @@ object RadioManager {
         if (audioCallback != null) return
         val cb = object : android.media.AudioDeviceCallback() {
             override fun onAudioDevicesAdded(addedDevices: Array<out android.media.AudioDeviceInfo>?) { if (audioSessionActive) applyAudioRoute() else detectOutputLabel() }
-            override fun onAudioDevicesRemoved(removedDevices: Array<out android.media.AudioDeviceInfo>?) { if (audioSessionActive) applyAudioRoute() else detectOutputLabel() }
+            override fun onAudioDevicesRemoved(removedDevices: Array<out android.media.AudioDeviceInfo>?) {
+                if (audioSessionActive) {
+                    applyAudioRoute()
+                } else {
+                    detectOutputLabel()
+                    // Auto-recupero: si ya no hay audífono ni voz, salimos del "SCO caliente"
+                    // (modo llamada que quedó puesto) para no dejar el teléfono en modo llamada.
+                    if (!talking && !consuming && !isHeadsetConnected()) sysAudio?.let { resetCommMode(it) }
+                }
+            }
         }
         audioCallback = cb
         runCatching { am.registerAudioDeviceCallback(cb, null) }
@@ -777,18 +786,21 @@ object RadioManager {
     private fun releaseAudioSession() {
         if (talking || consuming) return // sigue habiendo voz
         if (!audioSessionActive) return
-        // Con audífono/Bluetooth conectado NO soltamos la ruta entre transmisiones:
-        // el enlace SCO del BT tarda ~1-2s en re-establecerse y, si lo soltamos, la
-        // siguiente transmisión se iba al altavoz del teléfono (bug "suena la 1ª vez
-        // en el audífono y luego no"). El watchdog mantiene modo/volumen. Solo
-        // liberamos del todo si vamos por el teléfono/altavoz.
-        if (isHeadsetConnected() && !speakerOn) return
         audioSessionActive = false
-        abandonAudioFocus()
+        abandonAudioFocus() // SIEMPRE soltamos el foco: otras apps vuelven a sonar
         val am = sysAudio ?: return
+        // Con audífono/Bluetooth conectado mantenemos modo+ruta ("SCO caliente") para que
+        // la siguiente transmisión NO se vaya al altavoz del teléfono (el SCO tarda ~1-2s
+        // en re-establecerse). Al quitar el audífono se auto-recupera (ver callback).
+        if (isHeadsetConnected() && !speakerOn) return
+        resetCommMode(am)
+    }
+
+    /** Devuelve el audio a modo normal (quita modo llamada + dispositivo de comunicación). */
+    private fun resetCommMode(am: AudioManager) {
         runCatching {
             if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) am.clearCommunicationDevice()
-            am.mode = AudioManager.MODE_NORMAL
+            if (am.mode == AudioManager.MODE_IN_COMMUNICATION) am.mode = AudioManager.MODE_NORMAL
         }
     }
 
@@ -821,6 +833,11 @@ object RadioManager {
             abandonAudioFocus()
             runCatching {
                 audioCallback?.let { sysAudio?.unregisterAudioDeviceCallback(it) }; audioCallback = null
+                connectivityCb?.let { cb ->
+                    (appRef?.getSystemService(Context.CONNECTIVITY_SERVICE) as? android.net.ConnectivityManager)
+                        ?.unregisterNetworkCallback(cb)
+                }
+                connectivityCb = null
                 if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) sysAudio?.clearCommunicationDevice()
                 sysAudio?.mode = AudioManager.MODE_NORMAL
             }
