@@ -42,9 +42,15 @@ object Realtime {
         val s = IO.socket(origin + namespace, opts)
         // Si el servidor RECHAZA por token vencido (lo desconecta), refrescamos el token
         // y reconectamos con el nuevo — en ~1s, en vez de quedar en bucle con el viejo.
-        s.on(Socket.EVENT_CONNECT_ERROR) { refreshTokenAndReconnect() }
+        s.on(Socket.EVENT_CONNECT) { android.util.Log.d("RadioTiming", "socket $namespace CONNECT") }
+        s.on(Socket.EVENT_CONNECT_ERROR) { args ->
+            android.util.Log.w("RadioTiming", "socket $namespace CONNECT_ERROR: ${args.firstOrNull()}")
+            refreshTokenAndReconnect()
+        }
         s.on(Socket.EVENT_DISCONNECT) { args ->
-            if ((args.firstOrNull() as? String) == "io server disconnect") refreshTokenAndReconnect()
+            val reason = args.firstOrNull() as? String
+            android.util.Log.w("RadioTiming", "socket $namespace DISCONNECT: $reason")
+            if (reason == "io server disconnect") refreshTokenAndReconnect()
         }
         sockets[namespace] = s
         s.connect()
@@ -57,7 +63,10 @@ object Realtime {
         refreshing = true
         Thread {
             runCatching {
-                if (Backend.refreshAccessToken()) {
+                val prev = authMap["token"]
+                val ok = Backend.refreshAccessToken(prev) // dedup: si otro ya renovó, true
+                android.util.Log.w("RadioTiming", "refreshAccessToken -> $ok")
+                if (ok) {
                     authMap["token"] = Backend.tokens.accessToken ?: ""
                     synchronized(this) { sockets.values.forEach { runCatching { it.connect() } } }
                 }

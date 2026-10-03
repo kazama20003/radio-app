@@ -61,11 +61,16 @@ object Backend {
     private var refreshApiRef: RefreshApi? = null
 
     /**
-     * Renueva el access token usando el refresh token (bloqueante). Lo usa el socket
-     * cuando el servidor lo rechaza por token vencido, para reconectar con uno nuevo
-     * sin tener que cerrar sesión. Devuelve true si quedó un token válido.
+     * Renueva el access token usando el refresh token. ÚNICO punto de refresco (lo usan el
+     * socket y el interceptor REST), SINCRONIZADO + con deduplicación: el backend ROTA el
+     * refresh token (cada refresh revoca el anterior), así que dos refrescos en paralelo se
+     * pisaban y fallaban. Si otro hilo ya renovó (el token cambió respecto a [previousToken]),
+     * devolvemos éxito sin volver a llamar. Devuelve true si hay un token válido.
      */
-    fun refreshAccessToken(): Boolean {
+    @Synchronized
+    fun refreshAccessToken(previousToken: String? = null): Boolean {
+        val current = tokens.accessToken
+        if (previousToken != null && current != null && current != previousToken) return true
         val rt = tokens.refreshToken ?: return false
         val api = refreshApiRef ?: return false
         val r = runCatching { api.refresh(RefreshRequest(rt)).execute() }.getOrNull()
@@ -107,27 +112,16 @@ object Backend {
         val refreshAuthenticator = Authenticator { _: Route?, response: Response ->
             // Evita bucles: si ya reintentamos, abandona.
             if (responseCount(response) >= 2) return@Authenticator null
-            val rt = tokens.refreshToken ?: return@Authenticator null
-            val newSession = synchronized(this) {
-                // Puede que otro hilo ya renovara: valida contra el token usado.
-                val used = response.request.header("Authorization")?.removePrefix("Bearer ")
-                if (used != null && used != tokens.accessToken) {
-                    Session(tokens.accessToken ?: "", tokens.refreshToken ?: "")
-                } else {
-                    val r = runCatching { refreshApi.refresh(RefreshRequest(rt)).execute() }.getOrNull()
-                    val body = r?.body()
-                    if (r != null && r.isSuccessful && body != null) {
-                        tokens.save(body)
-                        body
-                    } else {
-                        tokens.clear()
-                        null
-                    }
-                }
-            } ?: return@Authenticator null
-
+            // Refresco ÚNICO y sincronizado (compartido con el socket): dedup contra el token
+            // que falló, para no rotar el refresh token en paralelo y romper la sesión.
+            val used = response.request.header("Authorization")?.removePrefix("Bearer ")
+            val ok = refreshAccessToken(used)
+            if (!ok) {
+                tokens.clear()
+                return@Authenticator null
+            }
             response.request.newBuilder()
-                .header("Authorization", "Bearer ${newSession.accessToken}")
+                .header("Authorization", "Bearer ${tokens.accessToken}")
                 .build()
         }
 
