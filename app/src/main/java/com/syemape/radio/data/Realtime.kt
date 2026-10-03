@@ -20,27 +20,50 @@ object Realtime {
 
     private val sockets = HashMap<String, Socket>()
 
+    // Token de auth COMPARTIDO y mutable: al refrescarlo, los reconnect lo reusan sin
+    // recrear el socket. Clave para que un token vencido (15 min) no deje "Conectando…".
+    private val authMap: MutableMap<String, String> = java.util.Collections.synchronizedMap(HashMap())
+    @Volatile private var refreshing = false
+
     fun socket(namespace: String): Socket = synchronized(this) {
         sockets[namespace]?.let { return it }
+        authMap["token"] = Backend.tokens.accessToken ?: ""
         val opts = IO.Options().apply {
             // Polling + WebSocket: conecta YA por polling (rápido y compatible con proxies)
-            // y sube a WebSocket. Antes, solo-WebSocket tardaba/reintentaba el handshake en
-            // algunas redes → "Conectando…" de 10-15s.
+            // y sube a WebSocket. Antes, solo-WebSocket tardaba/reintentaba el handshake.
             transports = arrayOf(Polling.NAME, WebSocket.NAME)
             reconnection = true
-            // Reconexión robusta: nunca se rinde y reintenta rápido. Clave para que
-            // la radio se recupere sola tras suspensiones en 2º plano de algunos
-            // fabricantes (Xiaomi/Huawei/Samsung/Oppo…).
             reconnectionAttempts = Int.MAX_VALUE
             reconnectionDelay = 500
             reconnectionDelayMax = 2000
             timeout = 8000
-            auth = mapOf("token" to (Backend.tokens.accessToken ?: ""))
+            auth = authMap // mismo mapa mutable: refrescar el token se refleja al reconectar
         }
         val s = IO.socket(origin + namespace, opts)
+        // Si el servidor RECHAZA por token vencido (lo desconecta), refrescamos el token
+        // y reconectamos con el nuevo — en ~1s, en vez de quedar en bucle con el viejo.
+        s.on(Socket.EVENT_CONNECT_ERROR) { refreshTokenAndReconnect() }
+        s.on(Socket.EVENT_DISCONNECT) { args ->
+            if ((args.firstOrNull() as? String) == "io server disconnect") refreshTokenAndReconnect()
+        }
         sockets[namespace] = s
         s.connect()
         s
+    }
+
+    /** Refresca el access token (si falló la auth del socket) y reconecta todos los sockets. */
+    private fun refreshTokenAndReconnect() {
+        if (refreshing) return
+        refreshing = true
+        Thread {
+            runCatching {
+                if (Backend.refreshAccessToken()) {
+                    authMap["token"] = Backend.tokens.accessToken ?: ""
+                    synchronized(this) { sockets.values.forEach { runCatching { it.connect() } } }
+                }
+            }
+            refreshing = false
+        }.start()
     }
 
     fun closeAll() = synchronized(this) {

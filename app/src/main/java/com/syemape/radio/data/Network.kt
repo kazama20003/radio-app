@@ -58,6 +58,25 @@ object Backend {
     lateinit var tokens: TokenStore
         private set
 
+    private var refreshApiRef: RefreshApi? = null
+
+    /**
+     * Renueva el access token usando el refresh token (bloqueante). Lo usa el socket
+     * cuando el servidor lo rechaza por token vencido, para reconectar con uno nuevo
+     * sin tener que cerrar sesión. Devuelve true si quedó un token válido.
+     */
+    fun refreshAccessToken(): Boolean {
+        val rt = tokens.refreshToken ?: return false
+        val api = refreshApiRef ?: return false
+        val r = runCatching { api.refresh(RefreshRequest(rt)).execute() }.getOrNull()
+        val body = r?.body()
+        return if (r != null && r.isSuccessful && body != null) {
+            tokens.save(body); true
+        } else {
+            false
+        }
+    }
+
     fun init(context: Context) {
         if (::api.isInitialized) return
         tokens = TokenStore(context.applicationContext)
@@ -83,6 +102,7 @@ object Backend {
             .addConverterFactory(GsonConverterFactory.create())
             .build()
             .create(RefreshApi::class.java)
+        refreshApiRef = refreshApi
 
         val refreshAuthenticator = Authenticator { _: Route?, response: Response ->
             // Evita bucles: si ya reintentamos, abandona.
