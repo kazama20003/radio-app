@@ -87,6 +87,7 @@ object RadioManager {
     /** Inicializa WebRTC/mediasoup y el micrófono (una vez). */
     private fun initWebrtc(app: Application) {
         if (initialized) return
+        val t0 = System.currentTimeMillis()
         MediasoupClient.initialize(app, DefaultLogHandler)
         val opt = MediaConstraintsOption().apply {
             enableAudioDownstream()
@@ -107,6 +108,7 @@ object RadioManager {
         runCatching { am?.enabled = false } // micro apagado hasta transmitir (half-duplex)
         factory = f; audioManager = am; constraints = opt
         initialized = true
+        android.util.Log.d(TAG, "initWebrtc listo en ${System.currentTimeMillis() - t0}ms")
     }
 
     @Volatile private var started = false
@@ -347,9 +349,11 @@ object RadioManager {
     private fun setupMediasoup() {
         // Listo solo si ambos transports existen; si no, reintenta lo que falte.
         if (setupDone && sendTransport != null && recvTransport != null) return
+        val t0 = System.currentTimeMillis()
         val cid = channelId ?: return
         val f = factory ?: return
-        val caps = ack("ms:rtpCapabilities") as? JSONObject ?: return
+        val caps = ack("ms:rtpCapabilities") as? JSONObject
+        if (caps == null) { android.util.Log.w(TAG, "setupMediasoup: sin rtpCapabilities (socket.connected=${socket.connected()})"); return }
         val dev = device ?: Device(f).also { device = it }
         if (!dev.loaded) runCatching { dev.load(caps.toString()) }
 
@@ -401,6 +405,7 @@ object RadioManager {
 
         // Marcar listo solo cuando ambos transports quedaron armados (si no, se reintenta).
         setupDone = sendTransport != null && recvTransport != null
+        android.util.Log.d(TAG, "setupMediasoup ${System.currentTimeMillis() - t0}ms send=${sendTransport != null} recv=${recvTransport != null}")
 
         // consumir al hablante actual si hay
         val cur = ack("ms:getProducer", JSONObject().put("channelId", cid)) as? JSONObject
@@ -740,7 +745,12 @@ object RadioManager {
                 val earpiece = firstOf(android.media.AudioDeviceInfo.TYPE_BUILTIN_EARPIECE)
                 val speaker = firstOf(android.media.AudioDeviceInfo.TYPE_BUILTIN_SPEAKER)
                 val target = if (speakerOn) speaker else (bt ?: wired ?: earpiece ?: speaker)
-                target?.let { am.setCommunicationDevice(it) }
+                val setOk = target?.let { am.setCommunicationDevice(it) } ?: false
+                android.util.Log.d(
+                    TAG,
+                    "applyAudioRoute speakerOn=$speakerOn bt=${bt != null} wired=${wired != null} " +
+                        "target=${target?.type} setCommunicationDevice=$setOk current=${am.communicationDevice?.type}",
+                )
                 val label = when {
                     bt != null -> "Bluetooth"
                     wired != null -> "Auricular"
@@ -924,7 +934,8 @@ object RadioManager {
     }
 
     /** Emite un evento y espera el ack (bloqueante, en hilo worker). */
-    private fun ack(event: String, payload: Any? = null, timeoutMs: Long = 8000): Any? {
+    private fun ack(event: String, payload: Any? = null, timeoutMs: Long = 4000): Any? {
+        val t0 = System.currentTimeMillis()
         val latch = CountDownLatch(1)
         val holder = arrayOfNulls<Any>(1)
         val cb = Ack { args -> holder[0] = args.firstOrNull(); latch.countDown() }
@@ -932,7 +943,12 @@ object RadioManager {
             null -> socket.emit(event, cb)
             else -> socket.emit(event, payload, cb)
         }
-        latch.await(timeoutMs, TimeUnit.MILLISECONDS)
+        val got = latch.await(timeoutMs, TimeUnit.MILLISECONDS)
+        val dt = System.currentTimeMillis() - t0
+        if (!got) android.util.Log.w(TAG, "ack '$event' TIMEOUT ${dt}ms (socket.connected=${socket.connected()})")
+        else if (dt > 800) android.util.Log.w(TAG, "ack '$event' lento: ${dt}ms")
         return holder[0]
     }
+
+    private const val TAG = "RadioTiming"
 }
