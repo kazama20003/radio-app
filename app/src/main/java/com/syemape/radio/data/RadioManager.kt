@@ -171,10 +171,8 @@ object RadioManager {
                 runCatching { recvTransport?.close() }; recvTransport = null
                 ui.launch { talking = false }
                 channelId?.let { socket.emit("channel:join", it) }
-                runCatching { setupMediasoup() }
-                // Marca conectado SOLO cuando el canal quedó rearmado (no antes).
-                val ok = sendTransport != null && recvTransport != null
-                ui.launch { connected = ok }
+                ui.launch { connected = true } // socket reconectado: ya estás EN LÍNEA
+                runCatching { setupMediasoup() } // transportes se rearman en 2º plano
             }
         })
         // El socket se cayó: refleja "desconectado" en la UI (ya no mentimos "En vivo").
@@ -199,9 +197,7 @@ object RadioManager {
             connectedUsers = me?.let { listOf(it) } ?: emptyList()
             members = if (me != null) 1 else 0
             socket.emit("channel:join", ch.id)
-            // OJO: "connected" se marca true SOLO cuando los transportes de audio están
-            // listos (abajo, tras setupMediasoup). Así "En vivo" y el botón HABLAR no
-            // mienten: si no hay canal de audio real, no se puede transmitir.
+            connected = true // EN LÍNEA apenas entramos al canal (no esperamos a WebRTC)
             refreshLastVoiceNote(ch.id)
             registerAudioCallback()
             detectOutputLabel() // etiqueta de salida (Bluetooth/Auricular/Teléfono) ya al conectar
@@ -212,26 +208,24 @@ object RadioManager {
             ui.launch {
                 while (started) {
                     delay(2000)
+                    // "connected" refleja el estado REAL del socket (rápido). Los transportes
+                    // de audio se arman aparte; hablar espera a que estén listos.
+                    val sc = socket.connected()
+                    if (connected != sc) connected = sc
                     if (connected) keepAudioAlive()
                     ensureSocketAlive() // si el socket se cayó en 2º plano, lo levanta
                     // Auto-cura el "canal muerto": socket arriba pero sin transportes de
-                    // audio → los rearma para que SÍ se pueda transmitir/grabar.
-                    if (socket.connected() && (sendTransport == null || recvTransport == null)) {
-                        worker.execute {
-                            runCatching { setupMediasoup() }
-                            val ok = sendTransport != null && recvTransport != null
-                            ui.launch { connected = ok }
-                        }
+                    // audio → los rearma en 2º plano para que SÍ se pueda transmitir/grabar.
+                    if (sc && (sendTransport == null || recvTransport == null)) {
+                        worker.execute { runCatching { setupMediasoup() } }
                     }
                 }
             }
             startLevelLoop()
-            // LENTO: WebRTC + mediasoup en segundo plano → al terminar, marca conectado real
+            // LENTO: WebRTC + mediasoup en segundo plano (no bloquea el "En vivo")
             worker.execute {
                 runCatching { initWebrtc(app) }.onFailure { return@execute }
                 runCatching { setupMediasoup() }
-                val ok = sendTransport != null && recvTransport != null
-                ui.launch { connected = ok }
             }
         }
     }
@@ -457,7 +451,6 @@ object RadioManager {
             if (socket.connected() && (sendTransport == null || recvTransport == null)) {
                 appRef?.let { runCatching { initWebrtc(it) } }
                 runCatching { setupMediasoup() }
-                ui.launch { connected = sendTransport != null && recvTransport != null }
             }
             if (isChannelReady()) return true
             runCatching { Thread.sleep(150) }

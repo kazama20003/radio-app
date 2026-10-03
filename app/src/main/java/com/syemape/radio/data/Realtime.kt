@@ -28,8 +28,8 @@ object Realtime {
             // la radio se recupere sola tras suspensiones en 2º plano de algunos
             // fabricantes (Xiaomi/Huawei/Samsung/Oppo…).
             reconnectionAttempts = Int.MAX_VALUE
-            reconnectionDelay = 800
-            reconnectionDelayMax = 4000
+            reconnectionDelay = 500
+            reconnectionDelayMax = 2000
             timeout = 8000
             auth = mapOf("token" to (Backend.tokens.accessToken ?: ""))
         }
