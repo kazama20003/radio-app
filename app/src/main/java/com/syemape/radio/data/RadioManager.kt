@@ -127,7 +127,7 @@ object RadioManager {
         sysAudio = app.getSystemService(Context.AUDIO_SERVICE) as AudioManager
         registerConnectivity(app) // estado de internet para el indicador de señal
         // Listeners + conexión del socket
-        socket.off("ms:newProducer"); socket.off("ms:producerClosed"); socket.off("connect"); socket.off("channel:presence")
+        socket.off("ms:newProducer"); socket.off("ms:producerClosed"); socket.off("connect"); socket.off("disconnect"); socket.off("channel:presence")
         socket.on("channel:presence", Emitter.Listener { args ->
             val o = args.firstOrNull() as? JSONObject ?: return@Listener
             if (o.optString("channelId") == channelId) {
@@ -172,8 +172,13 @@ object RadioManager {
                 ui.launch { talking = false }
                 channelId?.let { socket.emit("channel:join", it) }
                 runCatching { setupMediasoup() }
+                // Marca conectado SOLO cuando el canal quedó rearmado (no antes).
+                val ok = sendTransport != null && recvTransport != null
+                ui.launch { connected = ok }
             }
         })
+        // El socket se cayó: refleja "desconectado" en la UI (ya no mentimos "En vivo").
+        socket.on("disconnect", Emitter.Listener { ui.launch { connected = false } })
         if (!socket.connected()) socket.connect()
 
         // RÁPIDO: cargar canales + unirse + marcar conectado (sin esperar a WebRTC)
@@ -194,7 +199,9 @@ object RadioManager {
             connectedUsers = me?.let { listOf(it) } ?: emptyList()
             members = if (me != null) 1 else 0
             socket.emit("channel:join", ch.id)
-            connected = true
+            // OJO: "connected" se marca true SOLO cuando los transportes de audio están
+            // listos (abajo, tras setupMediasoup). Así "En vivo" y el botón HABLAR no
+            // mienten: si no hay canal de audio real, no se puede transmitir.
             refreshLastVoiceNote(ch.id)
             registerAudioCallback()
             detectOutputLabel() // etiqueta de salida (Bluetooth/Auricular/Teléfono) ya al conectar
@@ -207,13 +214,24 @@ object RadioManager {
                     delay(2000)
                     if (connected) keepAudioAlive()
                     ensureSocketAlive() // si el socket se cayó en 2º plano, lo levanta
+                    // Auto-cura el "canal muerto": socket arriba pero sin transportes de
+                    // audio → los rearma para que SÍ se pueda transmitir/grabar.
+                    if (socket.connected() && (sendTransport == null || recvTransport == null)) {
+                        worker.execute {
+                            runCatching { setupMediasoup() }
+                            val ok = sendTransport != null && recvTransport != null
+                            ui.launch { connected = ok }
+                        }
+                    }
                 }
             }
             startLevelLoop()
-            // LENTO: WebRTC + mediasoup en segundo plano
+            // LENTO: WebRTC + mediasoup en segundo plano → al terminar, marca conectado real
             worker.execute {
                 runCatching { initWebrtc(app) }.onFailure { return@execute }
                 runCatching { setupMediasoup() }
+                val ok = sendTransport != null && recvTransport != null
+                ui.launch { connected = ok }
             }
         }
     }
@@ -422,14 +440,37 @@ object RadioManager {
         }.start()
     }
 
+    /** El canal está realmente listo para transmitir (socket + ambos transportes). */
+    fun isChannelReady(): Boolean =
+        socket.connected() && sendTransport != null && recvTransport != null
+
+    /**
+     * Asegura que el canal esté listo para transmitir, ESPERANDO un poco si está
+     * reconectando (hasta [timeoutMs]). Reconecta el socket y rearma mediasoup si hace
+     * falta. Corre en el worker (serializado). Devuelve true si quedó listo.
+     */
+    private fun ensureReadyBlocking(timeoutMs: Long): Boolean {
+        if (isChannelReady()) return true
+        runCatching { if (!socket.connected()) socket.connect() }
+        val deadline = System.currentTimeMillis() + timeoutMs
+        while (System.currentTimeMillis() < deadline && talking) {
+            if (socket.connected() && (sendTransport == null || recvTransport == null)) {
+                appRef?.let { runCatching { initWebrtc(it) } }
+                runCatching { setupMediasoup() }
+                ui.launch { connected = sendTransport != null && recvTransport != null }
+            }
+            if (isChannelReady()) return true
+            runCatching { Thread.sleep(150) }
+        }
+        return isChannelReady()
+    }
+
     fun startTalking() {
         if (remoteSpeaking || talking) return // ya hablando o alguien más habla: no re-entrar
-        // Feedback instantáneo en UI; TODO el audio nativo (micro + produce) va al
-        // worker (un solo hilo) para no tocar el track nativo desde dos hilos a la vez
-        // (eso causaba cierres/crashes intermitentes al hablar).
+        // Feedback inmediato (el botón se pone rojo). TODO el audio nativo va al worker
+        // (un solo hilo) para no tocar el track nativo desde dos hilos (evita crashes).
         talking = true
         txFailed = false
-        beep(android.media.ToneGenerator.TONE_PROP_BEEP, 150) // pitido de inicio
         RadioService.refresh(appRef) // notificación → "Cortar"
         worker.execute {
             fun fail() {
@@ -438,18 +479,16 @@ object RadioManager {
                 runCatching { RadioService.refresh(appRef) }
             }
             try {
-                acquireAudioSession() // foco + modo llamada + ruta (en el worker)
-                // Si se presionó HABLAR antes de que WebRTC/mediasoup se armara (o si
-                // un intento previo falló), lo preparamos ahora en vez de rendirnos.
-                if (sendTransport == null) {
-                    appRef?.let { runCatching { initWebrtc(it) } }
-                    runCatching { setupMediasoup() }
-                }
-                if (!talking) { // el usuario soltó durante el setup
+                // Espera a que el canal esté LISTO (reconectando/rearmando si hace falta).
+                // Así no se pierde la voz por hablar "en falso" cuando acaba de reconectar.
+                if (!ensureReadyBlocking(3000)) return@execute fail()
+                if (!talking) { // el usuario soltó mientras conectaba
                     runCatching { audioManager?.enabled = false }
                     releaseAudioSession()
                     return@execute
                 }
+                acquireAudioSession() // foco + modo llamada + ruta (en el worker)
+                beep(android.media.ToneGenerator.TONE_PROP_BEEP, 150) // beep SOLO cuando sí transmitimos
                 runCatching { audioManager?.enabled = true } // micro en el MISMO hilo que produce
                 val send = sendTransport ?: return@execute fail()
                 val track = audioManager?.track ?: return@execute fail()

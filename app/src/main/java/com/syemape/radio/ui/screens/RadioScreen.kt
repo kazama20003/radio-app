@@ -42,6 +42,8 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.platform.LocalContext
@@ -269,11 +271,22 @@ private fun HoldTalkButton() {
                 .clip(CircleShape)
                 .background(if (talking) MapeColors.Red else MapeColors.Ink)
                 .pointerInput(Unit) {
-                    detectTapGestures(onPress = {
+                    // PTT a prueba de cancelación: empieza al tocar y SOLO termina cuando se
+                    // levanta el dedo de verdad. Antes, con detectTapGestures, las recomposiciones
+                    // (la onda de audio recompone ~8 veces/s) podían cancelar el gesto a los 2-3s
+                    // y cortar/perder la transmisión.
+                    awaitEachGesture {
+                        awaitFirstDown(requireUnconsumed = false)
                         RadioManager.startTalking()
-                        tryAwaitRelease()
-                        RadioManager.stopTalking()
-                    })
+                        try {
+                            while (true) {
+                                val event = awaitPointerEvent()
+                                if (event.changes.none { it.pressed }) break // todos los dedos arriba
+                            }
+                        } finally {
+                            RadioManager.stopTalking()
+                        }
+                    }
                 },
             verticalArrangement = Arrangement.Center,
             horizontalAlignment = Alignment.CenterHorizontally,
