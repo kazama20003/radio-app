@@ -182,7 +182,7 @@ object RadioManager {
         speakerOn = Prefs.speakerOn
         callVolume = Prefs.callVolume
         registerAudioCallback()
-        detectOutputLabel() // etiqueta de salida (Bluetooth/Auricular/Teléfono) ya al conectar
+        autoSelectOutput() // elige salida según haya BT/audífono (incluso si ya estaba conectado)
 
         // INMEDIATO: entra al ÚLTIMO canal guardado sin esperar la lista REST. Así la
         // presencia, "conectado" y la última nota aparecen al instante (antes todo esto
@@ -710,27 +710,12 @@ object RadioManager {
         if (audioCallback != null) return
         val cb = object : android.media.AudioDeviceCallback() {
             override fun onAudioDevicesAdded(addedDevices: Array<out android.media.AudioDeviceInfo>?) {
-                // Se conectó un audífono/BT → cambiar AUTOMÁTICAMENTE a él (no al altavoz).
-                val gotHeadset = addedDevices?.any { isHeadsetType(it.type) } == true
-                if (gotHeadset && speakerOn) {
-                    speakerOn = false
-                    Prefs.speakerOn = false
-                }
-                if (audioSessionActive) applyAudioRoute() else detectOutputLabel()
+                autoSelectOutput() // conectaron audífono/BT → úsalo
             }
             override fun onAudioDevicesRemoved(removedDevices: Array<out android.media.AudioDeviceInfo>?) {
-                // Se quitó el audífono/BT y no queda ninguno → volver al altavoz (no al
-                // auricular bajito), para no perder el audio de la radio.
-                if (!speakerOn && !isHeadsetConnected()) {
-                    speakerOn = true
-                    Prefs.speakerOn = true
-                }
-                if (audioSessionActive) {
-                    applyAudioRoute()
-                } else {
-                    detectOutputLabel()
-                    // Auto-recupero: si ya no hay audífono ni voz, salimos del "SCO caliente".
-                    if (!talking && !consuming && !isHeadsetConnected()) sysAudio?.let { resetCommMode(it) }
+                autoSelectOutput() // quitaron audífono/BT → vuelve al teléfono
+                if (!audioSessionActive && !talking && !consuming && !isHeadsetConnected()) {
+                    sysAudio?.let { resetCommMode(it) } // self-heal del modo llamada
                 }
             }
         }
@@ -798,7 +783,7 @@ object RadioManager {
 
     private var focusRequest: android.media.AudioFocusRequest? = null
 
-    /** Toma el foco de audio para que otras apps no bajen el volumen de la radio. */
+    /** Pide foco "a la par": la radio suena ENCIMA sin PAUSAR otras apps (solo las baja un poco). */
     private fun requestAudioFocus() {
         val am = sysAudio ?: return
         if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.O) return
@@ -808,8 +793,9 @@ object RadioManager {
                 .setUsage(android.media.AudioAttributes.USAGE_VOICE_COMMUNICATION)
                 .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SPEECH)
                 .build()
-            // TRANSIENT: al soltar el foco, otras apps (música, etc.) pueden reanudar.
-            val req = android.media.AudioFocusRequest.Builder(android.media.AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)
+            // MAY_DUCK: las otras apps (música, etc.) SIGUEN sonando (un poco más bajo) en
+            // vez de pausarse. Así se escucha la radio a la par con lo demás.
+            val req = android.media.AudioFocusRequest.Builder(android.media.AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK)
                 .setAudioAttributes(attrs)
                 .setWillPauseWhenDucked(false)
                 .build()
@@ -838,6 +824,19 @@ object RadioManager {
         audioSessionActive = true
         requestAudioFocus()
         applyAudioRoute() // MODE_IN_COMMUNICATION + ruta + volumen
+    }
+
+    /**
+     * Salida AUTOMÁTICA: si hay audífono/Bluetooth conectado se usa ese; si no, el altavoz
+     * del teléfono. Es lo esperado: BT conectado → suena en BT; sin BT → suena en el celular.
+     */
+    private fun autoSelectOutput() {
+        val wantSpeaker = !isHeadsetConnected()
+        if (speakerOn != wantSpeaker) {
+            speakerOn = wantSpeaker
+            Prefs.speakerOn = wantSpeaker
+        }
+        if (audioSessionActive) applyAudioRoute() else detectOutputLabel()
     }
 
     /** ¿Es un audífono (cable/USB) o Bluetooth? */
