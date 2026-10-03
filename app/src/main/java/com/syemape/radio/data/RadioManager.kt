@@ -58,6 +58,7 @@ object RadioManager {
     var normalDeviceLabel by mutableStateOf("Teléfono"); private set
     var audioLevel by mutableStateOf(0f); private set        // nivel de voz 0..1 (mueve la onda)
     var lastVoiceNote by mutableStateOf<RadioTransmission?>(null); private set // última nota de voz del canal
+    var netOnline by mutableStateOf(true); private set       // hay internet (ConnectivityManager)
 
     private val ui = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val worker = Executors.newSingleThreadExecutor()
@@ -124,6 +125,7 @@ object RadioManager {
         started = true
         appRef = app
         sysAudio = app.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        registerConnectivity(app) // estado de internet para el indicador de señal
         // Listeners + conexión del socket
         socket.off("ms:newProducer"); socket.off("ms:producerClosed"); socket.off("connect"); socket.off("channel:presence")
         socket.on("channel:presence", Emitter.Listener { args ->
@@ -214,6 +216,27 @@ object RadioManager {
                 runCatching { setupMediasoup() }
             }
         }
+    }
+
+    private var connectivityCb: android.net.ConnectivityManager.NetworkCallback? = null
+
+    /** Observa si hay internet (para el indicador de señal) y reconecta al volver la red. */
+    private fun registerConnectivity(app: Application) {
+        if (connectivityCb != null) return
+        val cm = app.getSystemService(Context.CONNECTIVITY_SERVICE) as? android.net.ConnectivityManager ?: return
+        netOnline = runCatching {
+            val caps = cm.getNetworkCapabilities(cm.activeNetwork)
+            caps?.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET) == true
+        }.getOrDefault(true)
+        val cb = object : android.net.ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: android.net.Network) {
+                ui.launch { netOnline = true }
+                ensureSocketAlive() // al volver la red, reengancha el socket de inmediato
+            }
+            override fun onLost(network: android.net.Network) { ui.launch { netOnline = false } }
+        }
+        connectivityCb = cb
+        runCatching { cm.registerDefaultNetworkCallback(cb) }
     }
 
     /** Reconecta el socket si se cayó (el listener 'connect' rearma todo). Barato. */
@@ -733,10 +756,33 @@ object RadioManager {
         applyAudioRoute() // MODE_IN_COMMUNICATION + ruta + volumen
     }
 
+    /** ¿Hay audífono por cable o Bluetooth conectado como salida de comunicación? */
+    private fun isHeadsetConnected(): Boolean {
+        val am = sysAudio ?: return false
+        if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.S) return false
+        return runCatching {
+            am.availableCommunicationDevices.any {
+                it.type in intArrayOf(
+                    android.media.AudioDeviceInfo.TYPE_BLUETOOTH_SCO,
+                    android.media.AudioDeviceInfo.TYPE_BLE_HEADSET,
+                    android.media.AudioDeviceInfo.TYPE_WIRED_HEADSET,
+                    android.media.AudioDeviceInfo.TYPE_WIRED_HEADPHONES,
+                    android.media.AudioDeviceInfo.TYPE_USB_HEADSET,
+                )
+            }
+        }.getOrDefault(false)
+    }
+
     /** Libera el audio del sistema cuando ya no hay voz (ni hablo ni recibo). */
     private fun releaseAudioSession() {
         if (talking || consuming) return // sigue habiendo voz
         if (!audioSessionActive) return
+        // Con audífono/Bluetooth conectado NO soltamos la ruta entre transmisiones:
+        // el enlace SCO del BT tarda ~1-2s en re-establecerse y, si lo soltamos, la
+        // siguiente transmisión se iba al altavoz del teléfono (bug "suena la 1ª vez
+        // en el audífono y luego no"). El watchdog mantiene modo/volumen. Solo
+        // liberamos del todo si vamos por el teléfono/altavoz.
+        if (isHeadsetConnected() && !speakerOn) return
         audioSessionActive = false
         abandonAudioFocus()
         val am = sysAudio ?: return

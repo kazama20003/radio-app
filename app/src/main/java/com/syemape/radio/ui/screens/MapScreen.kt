@@ -55,6 +55,22 @@ import com.syemape.radio.ui.theme.MapeColors
 import com.syemape.radio.ui.theme.Outfit
 import kotlinx.coroutines.launch
 
+/** Abre la navegación paso a paso en la app de mapas nativa (Google Maps). */
+private fun openNativeNav(context: android.content.Context, lat: Double, lng: Double) {
+    val nav = android.content.Intent(
+        android.content.Intent.ACTION_VIEW,
+        android.net.Uri.parse("google.navigation:q=$lat,$lng&mode=d"),
+    ).setPackage("com.google.android.apps.maps").addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+    val web = android.content.Intent(
+        android.content.Intent.ACTION_VIEW,
+        android.net.Uri.parse("https://www.google.com/maps/dir/?api=1&destination=$lat,$lng&travelmode=driving"),
+    ).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+    runCatching {
+        if (nav.resolveActivity(context.packageManager) != null) context.startActivity(nav)
+        else context.startActivity(web)
+    }
+}
+
 /** Decodifica una polilínea codificada de Google en una lista de puntos. */
 private fun decodePolyline(encoded: String): List<LatLng> {
     val poly = ArrayList<LatLng>()
@@ -277,6 +293,16 @@ private fun NavPanel(
                 color = MapeColors.TextOnDark, fontFamily = Outfit, fontSize = 12.sp, maxLines = 1,
             )
         }
+        // Navegación NATIVA (Google Maps, paso a paso por voz). Siempre disponible.
+        val ctx = androidx.compose.ui.platform.LocalContext.current
+        if (target.lastLat != null && target.lastLng != null) {
+            Box(
+                Modifier.size(44.dp).clip(CircleShape).background(MapeColors.White).pressScale {
+                    openNativeNav(ctx, target.lastLat, target.lastLng)
+                },
+                contentAlignment = Alignment.Center,
+            ) { Icon(MapeIcons.Pin, null, tint = MapeColors.Ink, modifier = Modifier.size(20.dp)) }
+        }
         if (route != null) {
             // Ver indicaciones
             Box(
@@ -438,8 +464,12 @@ private fun MapPreview(
             }
             units.filter { it.lat != null && it.lng != null }.forEach { u ->
                 val pos = com.google.android.gms.maps.model.LatLng(u.lat!!, u.lng!!)
+                // Reasignar la posición en cada recomposición: si no, el marcador se
+                // quedaba congelado en el primer punto (desfase en el mapa en vivo).
+                val st = com.google.maps.android.compose.rememberMarkerState(key = "unit-${u.unitId}", position = pos)
+                st.position = pos
                 com.google.maps.android.compose.Marker(
-                    state = com.google.maps.android.compose.rememberMarkerState(key = "unit-${u.unitId}", position = pos),
+                    state = st,
                     title = u.code ?: "Unidad",
                     icon = com.google.android.gms.maps.model.BitmapDescriptorFactory.defaultMarker(
                         com.google.android.gms.maps.model.BitmapDescriptorFactory.HUE_ORANGE

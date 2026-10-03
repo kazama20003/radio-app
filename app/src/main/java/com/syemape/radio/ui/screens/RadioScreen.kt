@@ -81,8 +81,24 @@ fun RadioScreen(topPadding: Dp, bottomPadding: Dp = 0.dp, onOpenChannelChat: (St
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween,
         ) {
-            Box(Modifier.size(44.dp).clip(CircleShape).background(MapeColors.Bg), contentAlignment = Alignment.Center) {
-                Icon(MapeIcons.Radio, null, tint = MapeColors.Ink, modifier = Modifier.size(22.dp))
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Box(Modifier.size(44.dp).clip(CircleShape).background(MapeColors.Bg), contentAlignment = Alignment.Center) {
+                    Icon(MapeIcons.Radio, null, tint = MapeColors.Ink, modifier = Modifier.size(22.dp))
+                }
+                // Indicador de señal / internet.
+                val online = RadioManager.netOnline
+                val live = online && RadioManager.connected
+                val netColor = when {
+                    live -> Color(0xFF2E9E5B)        // verde: conectado
+                    !online -> MapeColors.Red          // rojo: sin internet
+                    else -> Color(0xFFE6A100)          // ámbar: con red pero reconectando
+                }
+                Box(Modifier.size(44.dp).clip(CircleShape).background(MapeColors.Bg), contentAlignment = Alignment.Center) {
+                    Icon(
+                        if (online) MapeIcons.Wifi else MapeIcons.WifiOff, null,
+                        tint = netColor, modifier = Modifier.size(20.dp),
+                    )
+                }
             }
             Row(
                 Modifier.clip(CircleShape).background(MapeColors.Bg).padding(4.dp).horizontalScroll(rememberScrollState()),
@@ -113,6 +129,21 @@ fun RadioScreen(topPadding: Dp, bottomPadding: Dp = 0.dp, onOpenChannelChat: (St
                 "${RadioManager.members} conectados · ${if (RadioManager.connected) "En vivo" else "Conectando…"}",
                 color = MapeColors.TextMuted, fontFamily = Outfit, fontSize = 15.sp,
             )
+        }
+        // Aviso claro cuando no hay internet (por eso no se escucha / no transmite).
+        if (!RadioManager.netOnline) {
+            Spacer(Modifier.height(8.dp))
+            Row(
+                Modifier.clip(RoundedCornerShape(12.dp)).background(MapeColors.RedSoftBg).padding(horizontal = 12.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Icon(MapeIcons.WifiOff, null, tint = MapeColors.Red, modifier = Modifier.size(18.dp))
+                Text(
+                    "Sin internet · la voz no se escuchará hasta reconectar",
+                    color = MapeColors.RedDark, fontFamily = Outfit, fontWeight = FontWeight.Medium, fontSize = 13.sp,
+                )
+            }
         }
         // Quiénes están conectados en vivo (nombre/alias). Vacío si aún no llega presencia.
         if (RadioManager.connectedUsers.isNotEmpty()) {

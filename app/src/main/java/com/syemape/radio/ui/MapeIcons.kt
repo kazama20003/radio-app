@@ -167,6 +167,22 @@ object MapeIcons {
     val Download = buildIcon(1.9f, Part("M12 3v12M8 11l4 4 4-4"), Part("M5 19h14"))
     // Cerrar (X).
     val Close = buildIcon(2.2f, Part("M6 6l12 12M18 6L6 18"))
+    // Señal / internet OK (arcos Wi‑Fi + punto).
+    val Wifi = buildIcon(
+        2f,
+        Part("M3 8.5a15 15 0 0 1 18 0"),
+        Part("M6 12a10 10 0 0 1 12 0"),
+        Part("M9 15.5a5 5 0 0 1 6 0"),
+        Part(circlePath(12f, 19f, 0.8f), fill = true),
+    )
+    // Sin internet (Wi‑Fi tachado).
+    val WifiOff = buildIcon(
+        2f,
+        Part("M3 8.5a15 15 0 0 1 18 0"),
+        Part("M9 15.5a5 5 0 0 1 6 0"),
+        Part(circlePath(12f, 19f, 0.8f), fill = true),
+        Part("M3 3l18 18"),
+    )
     // Triángulo de alerta — severidad crítica / fallback.
     val AlertTriangle = buildIcon(
         1.9f,
