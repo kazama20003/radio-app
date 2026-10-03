@@ -748,12 +748,33 @@ object RadioManager {
                 val earpiece = firstOf(android.media.AudioDeviceInfo.TYPE_BUILTIN_EARPIECE)
                 val speaker = firstOf(android.media.AudioDeviceInfo.TYPE_BUILTIN_SPEAKER)
                 val target = if (speakerOn) speaker else (bt ?: wired ?: earpiece ?: speaker)
+                // El enlace SCO del BT es asíncrono: limpiar antes de fijar ayuda a que
+                // el cambio "pegue". Si no, el primer setCommunicationDevice devuelve true
+                // pero el audio se queda en el auricular.
+                if (!speakerOn && bt != null) runCatching { am.clearCommunicationDevice() }
                 val setOk = target?.let { am.setCommunicationDevice(it) } ?: false
                 android.util.Log.d(
                     TAG,
                     "applyAudioRoute speakerOn=$speakerOn bt=${bt != null} wired=${wired != null} " +
                         "target=${target?.type} setCommunicationDevice=$setOk current=${am.communicationDevice?.type}",
                 )
+                // Re-aplicar el BT tras establecerse el SCO (asíncrono): si a los ~1.2s el
+                // dispositivo activo aún no es el BT, lo volvemos a fijar.
+                if (!speakerOn && bt != null) {
+                    ui.launch {
+                        delay(1200)
+                        if (audioSessionActive && !speakerOn) runCatching {
+                            val b2 = am.availableCommunicationDevices.firstOrNull {
+                                it.type == android.media.AudioDeviceInfo.TYPE_BLUETOOTH_SCO ||
+                                    it.type == android.media.AudioDeviceInfo.TYPE_BLE_HEADSET
+                            }
+                            if (b2 != null && am.communicationDevice?.type != b2.type) {
+                                am.setCommunicationDevice(b2)
+                                android.util.Log.d(TAG, "reapply BT -> current=${am.communicationDevice?.type}")
+                            }
+                        }
+                    }
+                }
                 val label = when {
                     bt != null -> "Bluetooth"
                     wired != null -> "Auricular"
