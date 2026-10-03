@@ -19,6 +19,11 @@ object Prefs {
         get() = p?.getString("lastChannelId", null)
         set(v) { p?.edit()?.putString("lastChannelId", v)?.apply() }
 
+    /** Nombre del último canal (para mostrarlo al instante sin esperar la lista REST). */
+    var lastChannelName: String?
+        get() = p?.getString("lastChannelName", null)
+        set(v) { p?.edit()?.putString("lastChannelName", v)?.apply() }
+
     var speakerOn: Boolean
         get() = p?.getBoolean("speakerOn", true) ?: true
         set(v) { p?.edit()?.putBoolean("speakerOn", v)?.apply() }

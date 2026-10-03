@@ -179,54 +179,76 @@ object RadioManager {
         socket.on("disconnect", Emitter.Listener { ui.launch { connected = false } })
         if (!socket.connected()) socket.connect()
 
-        // RÁPIDO: cargar canales + unirse + marcar conectado (sin esperar a WebRTC)
+        speakerOn = Prefs.speakerOn
+        callVolume = Prefs.callVolume
+        registerAudioCallback()
+        detectOutputLabel() // etiqueta de salida (Bluetooth/Auricular/Teléfono) ya al conectar
+
+        // INMEDIATO: entra al ÚLTIMO canal guardado sin esperar la lista REST. Así la
+        // presencia, "conectado" y la última nota aparecen al instante (antes todo esto
+        // esperaba a que terminara una llamada REST lenta → 10-15s de "Conectando…").
+        Prefs.lastChannelId?.let { savedId ->
+            enterChannelNow(app, savedId, Prefs.lastChannelName ?: "Canal")
+        }
+
+        // Bucles de fondo (watchdog de conexión/audio, nivel de voz, WebRTC) — una sola vez.
+        startBackgroundLoops(app)
+
+        // EN PARALELO: lista de canales (chips + nombre real). Si no había canal guardado,
+        // elige uno y entra ahora; si ya entramos, solo corrige el nombre mostrado.
         ui.launch {
             val list = runCatching { Backend.api.radioChannels() }.getOrNull().orEmpty()
             channels = list
-            speakerOn = Prefs.speakerOn
-            callVolume = Prefs.callVolume
-            val saved = Prefs.lastChannelId
-            val ch = list.firstOrNull { it.id == saved }
-                ?: list.firstOrNull { it.joined }
-                ?: list.firstOrNull() ?: return@launch
-            channelId = ch.id
-            channelName = listOfNotNull(ch.name, ch.description).joinToString(" · ").ifBlank { "Canal" }
-            // Me muestro a MÍ al instante (ya estoy en el canal); la presencia en vivo
-            // (channel:presence) completa la lista real. Evita el "0 conectados" inicial.
-            val me = meUser()
-            connectedUsers = me?.let { listOf(it) } ?: emptyList()
-            members = if (me != null) 1 else 0
-            socket.emit("channel:join", ch.id)
-            connected = true // EN LÍNEA apenas entramos al canal (no esperamos a WebRTC)
-            refreshLastVoiceNote(ch.id)
-            registerAudioCallback()
-            detectOutputLabel() // etiqueta de salida (Bluetooth/Auricular/Teléfono) ya al conectar
-            RadioService.start(app, channelName)
-            // Watchdog: mientras HAY voz activa, re-asienta modo/volumen que el
-            // sistema puede resetear. En silencio no tocamos el audio del sistema
-            // (así otras apps conservan su micrófono y su sonido).
-            ui.launch {
-                while (started) {
-                    delay(2000)
-                    // "connected" refleja el estado REAL del socket (rápido). Los transportes
-                    // de audio se arman aparte; hablar espera a que estén listos.
-                    val sc = socket.connected()
-                    if (connected != sc) connected = sc
-                    if (connected) keepAudioAlive()
-                    ensureSocketAlive() // si el socket se cayó en 2º plano, lo levanta
-                    // Auto-cura el "canal muerto": socket arriba pero sin transportes de
-                    // audio → los rearma en 2º plano para que SÍ se pueda transmitir/grabar.
-                    if (sc && (sendTransport == null || recvTransport == null)) {
-                        worker.execute { runCatching { setupMediasoup() } }
-                    }
+            if (channelId == null) {
+                val ch = list.firstOrNull { it.joined } ?: list.firstOrNull() ?: return@launch
+                enterChannelNow(app, ch.id, listOfNotNull(ch.name, ch.description).joinToString(" · ").ifBlank { "Canal" })
+            } else {
+                list.firstOrNull { it.id == channelId }?.let { ch ->
+                    val nm = listOfNotNull(ch.name, ch.description).joinToString(" · ").ifBlank { "Canal" }
+                    channelName = nm
+                    Prefs.lastChannelName = nm
+                    RadioService.update(appRef, nm)
                 }
             }
-            startLevelLoop()
-            // LENTO: WebRTC + mediasoup en segundo plano (no bloquea el "En vivo")
-            worker.execute {
-                runCatching { initWebrtc(app) }.onFailure { return@execute }
-                runCatching { setupMediasoup() }
+        }
+    }
+
+    /** Entra a un canal YA: fija estado, se une por socket, marca EN LÍNEA y carga la última nota. */
+    private fun enterChannelNow(app: Application, id: String, name: String) {
+        channelId = id
+        channelName = name
+        Prefs.lastChannelId = id
+        Prefs.lastChannelName = name
+        val me = meUser()
+        connectedUsers = me?.let { listOf(it) } ?: emptyList()
+        members = if (me != null) 1 else 0
+        socket.emit("channel:join", id)
+        connected = true
+        refreshLastVoiceNote(id)
+        RadioService.start(app, channelName)
+    }
+
+    /** Lanza una sola vez: watchdog de conexión/audio, loop de nivel y armado de WebRTC. */
+    private fun startBackgroundLoops(app: Application) {
+        ui.launch {
+            while (started) {
+                delay(2000)
+                // "connected" refleja el estado REAL del socket (rápido). Los transportes
+                // de audio se arman aparte; hablar espera a que estén listos.
+                val sc = socket.connected()
+                if (connected != sc) connected = sc
+                if (connected) keepAudioAlive()
+                ensureSocketAlive() // si el socket se cayó en 2º plano, lo levanta
+                // Auto-cura el "canal muerto": socket arriba pero sin transportes → rearmar.
+                if (sc && (sendTransport == null || recvTransport == null)) {
+                    worker.execute { runCatching { setupMediasoup() } }
+                }
             }
+        }
+        startLevelLoop()
+        worker.execute {
+            runCatching { initWebrtc(app) }.onFailure { return@execute }
+            runCatching { setupMediasoup() }
         }
     }
 
@@ -288,6 +310,7 @@ object RadioManager {
         Prefs.lastChannelId = id
         channels.firstOrNull { it.id == id }?.let { ch ->
             channelName = listOfNotNull(ch.name, ch.description).joinToString(" · ").ifBlank { "Canal" }
+            Prefs.lastChannelName = channelName
             // Yo, al instante; la presencia del canal nuevo completa el resto.
             val me = meUser()
             connectedUsers = me?.let { listOf(it) } ?: emptyList()

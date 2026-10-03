@@ -4,6 +4,7 @@ import com.google.gson.Gson
 import com.syemape.radio.BuildConfig
 import io.socket.client.IO
 import io.socket.client.Socket
+import io.socket.engineio.client.transports.Polling
 import io.socket.engineio.client.transports.WebSocket
 import org.json.JSONObject
 
@@ -22,7 +23,10 @@ object Realtime {
     fun socket(namespace: String): Socket = synchronized(this) {
         sockets[namespace]?.let { return it }
         val opts = IO.Options().apply {
-            transports = arrayOf(WebSocket.NAME)
+            // Polling + WebSocket: conecta YA por polling (rápido y compatible con proxies)
+            // y sube a WebSocket. Antes, solo-WebSocket tardaba/reintentaba el handshake en
+            // algunas redes → "Conectando…" de 10-15s.
+            transports = arrayOf(Polling.NAME, WebSocket.NAME)
             reconnection = true
             // Reconexión robusta: nunca se rinde y reintenta rápido. Clave para que
             // la radio se recupere sola tras suspensiones en 2º plano de algunos
