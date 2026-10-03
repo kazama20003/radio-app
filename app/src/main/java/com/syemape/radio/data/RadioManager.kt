@@ -26,9 +26,11 @@ import io.socket.emitter.Emitter
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.util.concurrent.ConcurrentHashMap
 import org.json.JSONArray
 import org.json.JSONObject
 import org.webrtc.PeerConnectionFactory
@@ -59,6 +61,9 @@ object RadioManager {
 
     private val ui = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val worker = Executors.newSingleThreadExecutor()
+    // Dispatcher sobre el MISMO hilo worker: permite leer stats nativos serializados
+    // con produce/consume/close (nunca dos hilos tocando WebRTC a la vez → sin crash).
+    private val workerDispatcher = worker.asCoroutineDispatcher()
 
     private var initialized = false
     private var factory: PeerConnectionFactory? = null
@@ -68,7 +73,7 @@ object RadioManager {
     private var sendTransport: SendTransport? = null
     private var recvTransport: RecvTransport? = null
     private var producer: Producer? = null
-    private val consumers = HashMap<String, Consumer>()
+    private val consumers = ConcurrentHashMap<String, Consumer>()
     var channelId: String? = null; private set
     private var appRef: Application? = null
     private var sysAudio: AudioManager? = null
@@ -164,7 +169,7 @@ object RadioManager {
                 runCatching { recvTransport?.close() }; recvTransport = null
                 ui.launch { talking = false }
                 channelId?.let { socket.emit("channel:join", it) }
-                setupMediasoup()
+                runCatching { setupMediasoup() }
             }
         })
         if (!socket.connected()) socket.connect()
@@ -206,7 +211,7 @@ object RadioManager {
             // LENTO: WebRTC + mediasoup en segundo plano
             worker.execute {
                 runCatching { initWebrtc(app) }.onFailure { return@execute }
-                setupMediasoup()
+                runCatching { setupMediasoup() }
             }
         }
     }
@@ -344,30 +349,38 @@ object RadioManager {
     }
 
     private fun consume(producerId: String, speaker: String) {
-        val recv = recvTransport ?: return
-        val dev = device ?: return
-        val info = ack("ms:consume", JSONObject().put("producerId", producerId).put("rtpCapabilities", JSONObject(dev.rtpCapabilities))) as? JSONObject
-        if (info == null || info.has("error")) return
-        val consumer = recv.consume(
-            object : Consumer.Listener {
-                override fun onTransportClose(consumer: Consumer) {}
-            },
-            info.getString("id"),
-            info.getString("producerId"),
-            info.getString("kind"),
-            info.getJSONObject("rtpParameters").toString(),
-        )
-        consumers[consumer.id] = consumer
-        ack("ms:resume", JSONObject().put("consumerId", consumer.id))
-        // Toma el audio del sistema (foco + modo llamada + ruta) para reproducir la voz.
-        consuming = true
-        acquireAudioSession()
-        ui.launch { remoteSpeaking = true; speakerLabel = speaker }
+        try {
+            val recv = recvTransport ?: return
+            val dev = device ?: return
+            val info = ack("ms:consume", JSONObject().put("producerId", producerId).put("rtpCapabilities", JSONObject(dev.rtpCapabilities))) as? JSONObject
+            if (info == null || info.has("error")) return
+            val consumer = recv.consume(
+                object : Consumer.Listener {
+                    override fun onTransportClose(consumer: Consumer) {}
+                },
+                info.getString("id"),
+                info.getString("producerId"),
+                info.getString("kind"),
+                info.getJSONObject("rtpParameters").toString(),
+            )
+            consumers[consumer.id] = consumer
+            ack("ms:resume", JSONObject().put("consumerId", consumer.id))
+            // Toma el audio del sistema (foco + modo llamada + ruta) para reproducir la voz.
+            consuming = true
+            acquireAudioSession()
+            ui.launch { remoteSpeaking = true; speakerLabel = speaker }
+        } catch (t: Throwable) {
+            // No tumbar la app si falla crear/arrancar el consumer (p.ej. al entrar
+            // varios a la vez): la radio sigue viva y se reintenta en el próximo evento.
+        }
     }
 
     private fun closeConsumers() {
-        consumers.values.forEach { runCatching { it.close() } }
+        // Saca del mapa ANTES de cerrar (y copia) para que el loop de nivel no toque
+        // un consumer que se está cerrando. Todo serializado en el worker.
+        val snapshot = consumers.values.toList()
         consumers.clear()
+        snapshot.forEach { runCatching { it.close() } }
         consuming = false
         releaseAudioSession() // dejé de recibir: libera el audio si tampoco estoy hablando
         ui.launch { remoteSpeaking = false; speakerLabel = null }
@@ -375,41 +388,53 @@ object RadioManager {
 
     /** Pitido corto tipo walkie-talkie (inicio/fin de transmisión). */
     private fun beep(tone: Int, durationMs: Int) {
-        worker.execute {
+        // Hilo propio (NO el worker): así el pitido no bloquea ni retrasa el produce.
+        Thread {
             runCatching {
                 val tg = android.media.ToneGenerator(AudioManager.STREAM_VOICE_CALL, 90)
                 tg.startTone(tone, durationMs)
                 Thread.sleep((durationMs + 60).toLong())
                 tg.release()
             }
-        }
+        }.start()
     }
 
     fun startTalking() {
-        if (remoteSpeaking) return
-        // Feedback instantáneo (sin esperar al handshake de produce): UI + micro + pitido.
+        if (remoteSpeaking || talking) return // ya hablando o alguien más habla: no re-entrar
+        // Feedback instantáneo en UI; TODO el audio nativo (micro + produce) va al
+        // worker (un solo hilo) para no tocar el track nativo desde dos hilos a la vez
+        // (eso causaba cierres/crashes intermitentes al hablar).
         talking = true
         txFailed = false
-        acquireAudioSession() // toma el audio del sistema solo ahora que voy a hablar
-        runCatching { audioManager?.enabled = true } // activa el micrófono ya
         beep(android.media.ToneGenerator.TONE_PROP_BEEP, 150) // pitido de inicio
         RadioService.refresh(appRef) // notificación → "Cortar"
         worker.execute {
-            fun fail() { ui.launch { talking = false; txFailed = true }; runCatching { audioManager?.enabled = false } }
-            // Si se presionó HABLAR antes de que WebRTC/mediasoup terminara de armarse
-            // (o si un intento previo falló), lo preparamos ahora en vez de rendirnos.
-            if (sendTransport == null) {
-                appRef?.let { runCatching { initWebrtc(it) } }
-                runCatching { setupMediasoup() }
+            fun fail() {
+                ui.launch { talking = false; txFailed = true }
+                runCatching { audioManager?.enabled = false }
+                runCatching { RadioService.refresh(appRef) }
             }
-            if (!talking) return@execute // el usuario soltó durante el setup
-            val send = sendTransport ?: return@execute fail()
-            val track = audioManager?.track ?: return@execute fail()
             try {
+                acquireAudioSession() // foco + modo llamada + ruta (en el worker)
+                // Si se presionó HABLAR antes de que WebRTC/mediasoup se armara (o si
+                // un intento previo falló), lo preparamos ahora en vez de rendirnos.
+                if (sendTransport == null) {
+                    appRef?.let { runCatching { initWebrtc(it) } }
+                    runCatching { setupMediasoup() }
+                }
+                if (!talking) { // el usuario soltó durante el setup
+                    runCatching { audioManager?.enabled = false }
+                    releaseAudioSession()
+                    return@execute
+                }
+                runCatching { audioManager?.enabled = true } // micro en el MISMO hilo que produce
+                val send = sendTransport ?: return@execute fail()
+                val track = audioManager?.track ?: return@execute fail()
                 producer = send.produce(object : Producer.Listener {
                     override fun onTransportClose(producer: Producer) {}
                 }, track)
-            } catch (e: Exception) {
+            } catch (t: Throwable) {
+                // Atrapa cualquier error (incluidos los no-Exception) para NO tumbar la app.
                 fail()
             }
         }
@@ -417,14 +442,14 @@ object RadioManager {
 
     fun stopTalking() {
         if (!talking) return
-        talking = false // instantáneo
-        runCatching { audioManager?.enabled = false } // silencia el micrófono ya
+        talking = false // instantáneo en UI
         beep(android.media.ToneGenerator.TONE_PROP_BEEP2, 120) // pitido "roger" al soltar
         RadioService.refresh(appRef) // notificación → "Hablar"
         worker.execute {
+            runCatching { audioManager?.enabled = false } // silencia el micro en el worker
             runCatching { producer?.close() }
             producer = null
-            socket.emit("ms:closeProducer")
+            runCatching { socket.emit("ms:closeProducer") }
             releaseAudioSession() // terminé de hablar: libera el audio a otras apps
         }
     }
@@ -561,12 +586,15 @@ object RadioManager {
         levelPolling = true
         ui.launch {
             while (started) {
-                val raw = when {
-                    talking -> withContext(Dispatchers.IO) { runCatching { parseAudioLevel(producer?.stats) }.getOrNull() }
-                    remoteSpeaking -> withContext(Dispatchers.IO) { runCatching { parseAudioLevel(consumers.values.firstOrNull()?.stats) }.getOrNull() }
-                    else -> 0f
-                } ?: 0f
+                // Lee el stats nativo SOLO en el worker (mismo hilo que produce/consume/
+                // close): nunca se toca WebRTC desde dos hilos → sin crash al entrar varios.
+                val statsJson = when {
+                    talking -> withContext(workerDispatcher) { runCatching { producer?.stats }.getOrNull() }
+                    remoteSpeaking -> withContext(workerDispatcher) { runCatching { consumers.values.firstOrNull()?.stats }.getOrNull() }
+                    else -> null
+                }
                 // audioLevel de WebRTC es RMS (voz ≈ 0..0.3): lo amplificamos y suavizamos.
+                val raw = statsJson?.let { runCatching { parseAudioLevel(it) }.getOrNull() } ?: 0f
                 val target = (raw * 3.4f).coerceIn(0f, 1f)
                 audioLevel += (target - audioLevel) * 0.45f
                 delay(120)
