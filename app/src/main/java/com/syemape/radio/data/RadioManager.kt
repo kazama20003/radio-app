@@ -325,13 +325,17 @@ object RadioManager {
         talking = false; remoteSpeaking = false; speakerLabel = null; txFailed = false
         lastVoiceNote = null // la nota es por-canal; se recarga la del canal nuevo
         RadioService.update(appRef, channelName)
-        // Trabajo de red/mediasoup en segundo plano (no bloquea la UI)
+        // Salir/entrar al canal YA (NO dentro del hilo de audio): así la presencia y la
+        // última nota del canal nuevo llegan al instante, sin esperar a un ack que puede
+        // tardar. Antes esto iba en el worker y, si estaba ocupado, el cambio tardaba.
+        runCatching { prev?.let { socket.emit("channel:leave", it) } }
+        runCatching { socket.emit("channel:join", id) }
+        refreshLastVoiceNote(id)
+        // Audio (cerrar lo viejo + consumir al hablante del nuevo) en 2º plano: no bloquea
+        // la sensación de "conectado" (los transportes persisten → seguimos EN VIVO).
         worker.execute {
             closeConsumers()
             runCatching { producer?.close() }; producer = null
-            prev?.let { socket.emit("channel:leave", it) }
-            socket.emit("channel:join", id)
-            refreshLastVoiceNote(id)
             val cur = ack("ms:getProducer", JSONObject().put("channelId", id)) as? JSONObject
             val curProducer = cur?.optString("producerId")?.takeIf { it.isNotEmpty() }
             if (curProducer != null) consume(curProducer, cur?.let { speakerAliasFrom(it) } ?: "Alguien del canal")
@@ -705,14 +709,27 @@ object RadioManager {
         val am = sysAudio ?: return
         if (audioCallback != null) return
         val cb = object : android.media.AudioDeviceCallback() {
-            override fun onAudioDevicesAdded(addedDevices: Array<out android.media.AudioDeviceInfo>?) { if (audioSessionActive) applyAudioRoute() else detectOutputLabel() }
+            override fun onAudioDevicesAdded(addedDevices: Array<out android.media.AudioDeviceInfo>?) {
+                // Se conectó un audífono/BT → cambiar AUTOMÁTICAMENTE a él (no al altavoz).
+                val gotHeadset = addedDevices?.any { isHeadsetType(it.type) } == true
+                if (gotHeadset && speakerOn) {
+                    speakerOn = false
+                    Prefs.speakerOn = false
+                }
+                if (audioSessionActive) applyAudioRoute() else detectOutputLabel()
+            }
             override fun onAudioDevicesRemoved(removedDevices: Array<out android.media.AudioDeviceInfo>?) {
+                // Se quitó el audífono/BT y no queda ninguno → volver al altavoz (no al
+                // auricular bajito), para no perder el audio de la radio.
+                if (!speakerOn && !isHeadsetConnected()) {
+                    speakerOn = true
+                    Prefs.speakerOn = true
+                }
                 if (audioSessionActive) {
                     applyAudioRoute()
                 } else {
                     detectOutputLabel()
-                    // Auto-recupero: si ya no hay audífono ni voz, salimos del "SCO caliente"
-                    // (modo llamada que quedó puesto) para no dejar el teléfono en modo llamada.
+                    // Auto-recupero: si ya no hay audífono ni voz, salimos del "SCO caliente".
                     if (!talking && !consuming && !isHeadsetConnected()) sysAudio?.let { resetCommMode(it) }
                 }
             }
@@ -823,21 +840,20 @@ object RadioManager {
         applyAudioRoute() // MODE_IN_COMMUNICATION + ruta + volumen
     }
 
+    /** ¿Es un audífono (cable/USB) o Bluetooth? */
+    private fun isHeadsetType(t: Int): Boolean = t in intArrayOf(
+        android.media.AudioDeviceInfo.TYPE_BLUETOOTH_SCO,
+        android.media.AudioDeviceInfo.TYPE_BLE_HEADSET,
+        android.media.AudioDeviceInfo.TYPE_WIRED_HEADSET,
+        android.media.AudioDeviceInfo.TYPE_WIRED_HEADPHONES,
+        android.media.AudioDeviceInfo.TYPE_USB_HEADSET,
+    )
+
     /** ¿Hay audífono por cable o Bluetooth conectado como salida de comunicación? */
     private fun isHeadsetConnected(): Boolean {
         val am = sysAudio ?: return false
         if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.S) return false
-        return runCatching {
-            am.availableCommunicationDevices.any {
-                it.type in intArrayOf(
-                    android.media.AudioDeviceInfo.TYPE_BLUETOOTH_SCO,
-                    android.media.AudioDeviceInfo.TYPE_BLE_HEADSET,
-                    android.media.AudioDeviceInfo.TYPE_WIRED_HEADSET,
-                    android.media.AudioDeviceInfo.TYPE_WIRED_HEADPHONES,
-                    android.media.AudioDeviceInfo.TYPE_USB_HEADSET,
-                )
-            }
-        }.getOrDefault(false)
+        return runCatching { am.availableCommunicationDevices.any { isHeadsetType(it.type) } }.getOrDefault(false)
     }
 
     /** Libera el audio del sistema cuando ya no hay voz (ni hablo ni recibo). */
@@ -845,12 +861,12 @@ object RadioManager {
         if (talking || consuming) return // sigue habiendo voz
         if (!audioSessionActive) return
         audioSessionActive = false
-        abandonAudioFocus() // SIEMPRE soltamos el foco: otras apps vuelven a sonar
+        abandonAudioFocus() // soltamos el foco: otras apps vuelven a sonar
         val am = sysAudio ?: return
-        // Con audífono/Bluetooth conectado mantenemos modo+ruta ("SCO caliente") para que
-        // la siguiente transmisión NO se vaya al altavoz del teléfono (el SCO tarda ~1-2s
-        // en re-establecerse). Al quitar el audífono se auto-recupera (ver callback).
-        if (isHeadsetConnected() && !speakerOn) return
+        // SIEMPRE salimos del modo llamada y soltamos el dispositivo de comunicación en
+        // silencio. Antes lo manteníamos "caliente" con BT, pero eso DEJABA el teléfono en
+        // modo llamada y bloqueaba el audio Bluetooth de las demás apps (música, etc.).
+        // Al hablar/recibir se vuelve a tomar el BT (acquireAudioSession → applyAudioRoute).
         resetCommMode(am)
     }
 
