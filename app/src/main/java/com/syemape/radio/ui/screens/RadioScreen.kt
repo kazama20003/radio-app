@@ -27,7 +27,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
@@ -85,13 +84,12 @@ fun RadioScreen(
     }
 
     Column(Modifier.fillMaxSize().background(MapeColors.Bg)) {
-        RadioHero(topPadding, onOpenSettings)
+        RadioHero(topPadding, onOpenSettings, compact = true)
         Column(
             Modifier.weight(1f).fillMaxWidth()
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 16.dp)
-                .padding(bottom = bottomPadding + 96.dp, top = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
+                .padding(horizontal = 12.dp)
+                .padding(bottom = bottomPadding + 76.dp, top = 6.dp),
+            verticalArrangement = Arrangement.spacedBy(5.dp),
         ) {
             if (RadioManager.channels.isNotEmpty()) {
                 Row(
@@ -105,7 +103,7 @@ fun RadioScreen(
                                 .background(if (selected) MapeColors.Ink else MapeColors.Card)
                                 .border(1.dp, MapeColors.Border, CircleShape)
                                 .clickable { RadioManager.selectChannel(channel.id) }
-                                .padding(horizontal = 15.dp, vertical = 8.dp),
+                                .padding(horizontal = 12.dp, vertical = 5.dp),
                         ) {
                             Text(
                                 channel.name ?: "Canal",
@@ -119,13 +117,11 @@ fun RadioScreen(
                 }
             }
 
-            RadioChannelCard(
+            RadioChannelCard(compact = true,
                 onOpen = {
                     RadioManager.channelId?.let { onOpenChannelChat(it, RadioManager.channelName) }
                 },
             )
-
-            RadioMemberCard()
 
             val lastNote = RadioManager.lastVoiceNote
             var lastPlaying by remember { mutableStateOf(false) }
@@ -149,7 +145,7 @@ fun RadioScreen(
             }
 
             Box(
-                Modifier.fillMaxWidth().height(65.dp).clip(RoundedCornerShape(18.dp))
+                Modifier.fillMaxWidth().height(39.dp).clip(RoundedCornerShape(14.dp))
                     .background(MapeColors.Card).border(1.dp, MapeColors.Border, RoundedCornerShape(18.dp))
                     .padding(horizontal = 10.dp, vertical = 5.dp),
                 contentAlignment = Alignment.Center,
@@ -177,11 +173,11 @@ fun RadioScreen(
             }
 
             Box(Modifier.fillMaxWidth().padding(vertical = 2.dp), contentAlignment = Alignment.Center) {
-                HoldTalkButton()
+                HoldTalkButton(compact = true)
             }
 
             Row(
-                Modifier.fillMaxWidth().padding(horizontal = 8.dp),
+                Modifier.fillMaxWidth().height(25.dp).padding(horizontal = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
             ) {
@@ -194,9 +190,9 @@ fun RadioScreen(
 }
 
 @Composable
-private fun RadioHero(topPadding: Dp, onOpenSettings: () -> Unit) {
+private fun RadioHero(topPadding: Dp, onOpenSettings: () -> Unit, compact: Boolean = false) {
     Box(
-        Modifier.fillMaxWidth().height(184.dp).clip(RoundedCornerShape(bottomStart = 24.dp, bottomEnd = 24.dp)),
+        Modifier.fillMaxWidth().height(if (compact) 128.dp else 184.dp).clip(RoundedCornerShape(bottomStart = 24.dp, bottomEnd = 24.dp)),
     ) {
         Image(
             painter = painterResource(com.syemape.radio.R.drawable.radio_hero),
@@ -210,7 +206,7 @@ private fun RadioHero(topPadding: Dp, onOpenSettings: () -> Unit) {
             ),
         )
         Column(
-            Modifier.align(Alignment.BottomStart).padding(start = 20.dp, end = 72.dp, bottom = 18.dp),
+            Modifier.align(Alignment.BottomStart).padding(start = 20.dp, end = 72.dp, bottom = if (compact) 10.dp else 18.dp),
             verticalArrangement = Arrangement.spacedBy(3.dp),
         ) {
             Text("S & E MAPE E.I.R.L.", color = Color.White, fontFamily = Outfit, fontWeight = FontWeight.Bold, fontSize = 18.sp)
@@ -235,23 +231,23 @@ private fun RadioHero(topPadding: Dp, onOpenSettings: () -> Unit) {
 }
 
 @Composable
-private fun RadioChannelCard(onOpen: () -> Unit) {
+private fun RadioChannelCard(compact: Boolean = false, onOpen: () -> Unit) {
     val brandRed = Color(0xFFD71920)
     Row(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp)).background(MapeColors.Card)
             .border(1.dp, MapeColors.Border, RoundedCornerShape(20.dp))
-            .clickable(onClick = onOpen).padding(13.dp),
+            .clickable(onClick = onOpen).padding(if (compact) 8.dp else 13.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Box(
-            Modifier.size(54.dp).clip(RoundedCornerShape(15.dp)).background(MapeColors.Ink),
+            Modifier.size(38.dp).clip(RoundedCornerShape(15.dp)).background(MapeColors.Ink),
             contentAlignment = Alignment.Center,
-        ) { Icon(MapeIcons.Radio, null, tint = MapeColors.White, modifier = Modifier.size(28.dp)) }
+        ) { Icon(MapeIcons.Radio, null, tint = MapeColors.White, modifier = Modifier.size(21.dp)) }
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(1.dp)) {
-            Text("CANAL · ${RadioManager.channelName.uppercase()}", color = MapeColors.TextMuted, fontFamily = Outfit, fontWeight = FontWeight.Bold, fontSize = 10.sp)
-            Text(RadioManager.channelName, color = MapeColors.Text, fontFamily = Outfit, fontWeight = FontWeight.Bold, fontSize = 22.sp)
-            Text("${RadioManager.members} conectados · ${if (RadioManager.connected) "En vivo" else "Conectando…"}", color = MapeColors.TextMuted, fontFamily = Outfit, fontSize = 11.sp)
+            Text("CANAL · ${RadioManager.channelName.uppercase()}", color = MapeColors.TextMuted, fontFamily = Outfit, fontWeight = FontWeight.Bold, fontSize = if (compact) 8.sp else 10.sp, maxLines = 1)
+            Text(RadioManager.channelName, color = MapeColors.Text, fontFamily = Outfit, fontWeight = FontWeight.Bold, fontSize = if (compact) 17.sp else 22.sp, maxLines = 1)
+            Text("${RadioManager.members} conectados · ${if (RadioManager.connected) "En vivo" else "Conectando…"}", color = MapeColors.TextMuted, fontFamily = Outfit, fontSize = if (compact) 9.sp else 11.sp, maxLines = 1)
         }
         Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(3.dp)) {
             Box(Modifier.size(12.dp).clip(CircleShape).background(if (RadioManager.connected) Color(0xFF20B15A) else Color(0xFFE7A820)))
@@ -282,7 +278,7 @@ private fun RadioMemberCard() {
 @Composable
 private fun RadioActionCard(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, modifier: Modifier, onClick: () -> Unit) {
     Row(
-        modifier.height(48.dp).clip(RoundedCornerShape(14.dp)).background(MapeColors.Card)
+        modifier.height(38.dp).clip(RoundedCornerShape(12.dp)).background(MapeColors.Card)
             .border(1.dp, MapeColors.Border, RoundedCornerShape(14.dp)).clickable(onClick = onClick)
             .padding(horizontal = 11.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -310,14 +306,14 @@ private fun RadioSpeakerStatus() {
     }
     Row(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(17.dp)).background(MapeColors.Card)
-            .border(1.dp, MapeColors.Border, RoundedCornerShape(17.dp)).padding(horizontal = 13.dp, vertical = 10.dp),
+            .border(1.dp, MapeColors.Border, RoundedCornerShape(14.dp)).padding(horizontal = 10.dp, vertical = 5.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(11.dp),
     ) {
         Icon(MapeIcons.Speaker, null, tint = Color(0xFFD71920), modifier = Modifier.size(25.dp))
         Column(Modifier.weight(1f)) {
             Text(label, color = Color(0xFFD71920), fontFamily = Outfit, fontWeight = FontWeight.Bold, fontSize = 10.sp)
-            Text(name, color = MapeColors.Text, fontFamily = Outfit, fontWeight = FontWeight.SemiBold, fontSize = 17.sp, maxLines = 1)
+            Text(name, color = MapeColors.Text, fontFamily = Outfit, fontWeight = FontWeight.SemiBold, fontSize = 14.sp, maxLines = 1)
         }
         Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(3.dp), modifier = Modifier.height(22.dp)) {
             val strength = if (RadioManager.netOnline) 4 else 1
@@ -333,19 +329,19 @@ private fun RadioSpeakerStatus() {
 }
 
 @Composable
-private fun HoldTalkButton() {
+private fun HoldTalkButton(compact: Boolean = false) {
     val talking = RadioManager.talking
     val ready = RadioManager.connected // true solo cuando el canal de audio está listo
     val brandRed = Color(0xFFD71920)
     Box(contentAlignment = Alignment.Center) {
         Box(
-            Modifier.size(178.dp).clip(CircleShape)
+            Modifier.size(if (compact) 118.dp else 178.dp).clip(CircleShape)
                 .background(if (talking) brandRed.copy(alpha = 0.13f) else brandRed.copy(alpha = 0.07f))
                 .border(3.dp, brandRed.copy(alpha = 0.45f), CircleShape),
         )
         Column(
             Modifier
-                .size(158.dp)
+                .size(if (compact) 104.dp else 158.dp)
                 .clip(CircleShape)
                 .background(
                     when {
@@ -377,15 +373,15 @@ private fun HoldTalkButton() {
             verticalArrangement = Arrangement.Center,
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            Icon(MapeIcons.Mic, null, tint = if (talking) Color.White else brandRed, modifier = Modifier.size(48.dp))
-            Spacer(Modifier.height(6.dp))
+            Icon(MapeIcons.Mic, null, tint = if (talking) Color.White else brandRed, modifier = Modifier.size(if (compact) 32.dp else 48.dp))
+            Spacer(Modifier.height(if (compact) 1.dp else 6.dp))
             Text(
                 when {
                     talking -> "CORTAR"
                     !ready -> "CONECTANDO…"
                     else -> "HABLAR"
                 },
-                color = if (talking) Color.White else brandRed, fontFamily = Outfit, fontWeight = FontWeight.Bold, fontSize = 16.sp, letterSpacing = 1.2.sp,
+                color = if (talking) Color.White else brandRed, fontFamily = Outfit, fontWeight = FontWeight.Bold, fontSize = if (compact) 12.sp else 16.sp, letterSpacing = 1.2.sp,
             )
         }
     }
