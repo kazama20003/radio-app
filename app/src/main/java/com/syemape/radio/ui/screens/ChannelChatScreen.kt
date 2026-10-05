@@ -164,10 +164,66 @@ fun ChannelChatScreen(channelId: String, title: String, topPadding: Dp, bottomPa
     // Notas de voz: las reproduce RadioManager con el MISMO enrutado que la radio
     // (stream de llamada + altavoz + volumen de la radio) para que suenen fuerte.
     var playingId by remember { mutableStateOf<String?>(null) }
-    DisposableEffect(Unit) { onDispose { com.syemape.radio.data.RadioManager.stopVoiceNote { } } }
+    var playbackQueue by remember { mutableStateOf<List<RadioTransmission>>(emptyList()) }
+    var playbackGeneration by remember { mutableStateOf(0) }
+    fun scrollToVoice(id: String) {
+        var row = 0
+        var previousDay: String? = null
+        for (message in items) {
+            val day = Fmt.dayKey(message.createdAt)
+            if (day != previousDay) {
+                row++ // encabezado de fecha
+                previousDay = day
+            }
+            if (message.id == id) break
+            row++
+        }
+        scope.launch { listState.animateScrollToItem(row.coerceAtLeast(0)) }
+    }
+    fun playSequence(sequence: List<RadioTransmission>, index: Int, generation: Int) {
+        if (generation != playbackGeneration) return
+        val note = sequence.getOrNull(index)
+        if (note == null) {
+            playbackQueue = emptyList()
+            playingId = null
+            return
+        }
+        val url = urlOf(note.audioKey) ?: run {
+            scope.launch { playSequence(sequence, index + 1, generation) }
+            return
+        }
+        com.syemape.radio.data.RadioManager.playVoiceNote(
+            url = url,
+            id = note.id,
+            onCompletion = {
+                scope.launch { if (generation == playbackGeneration) playSequence(sequence, index + 1, generation) }
+            },
+            onState = {
+                playingId = it
+                if (it != null) scrollToVoice(it)
+            },
+        )
+    }
+    DisposableEffect(Unit) {
+        onDispose {
+            playbackGeneration++
+            playbackQueue = emptyList()
+            com.syemape.radio.data.RadioManager.stopVoiceNote { }
+        }
+    }
     fun toggleVoice(t: RadioTransmission) {
-        val url = urlOf(t.audioKey) ?: return
-        com.syemape.radio.data.RadioManager.playVoiceNote(url, t.id) { playingId = it }
+        if (playingId == t.id) {
+            playbackGeneration++
+            playbackQueue = emptyList()
+            com.syemape.radio.data.RadioManager.stopVoiceNote { playingId = null }
+            return
+        }
+        val sequence = items.filter { !it.audioKey.isNullOrBlank() }
+        val start = sequence.indexOfFirst { it.id == t.id }
+        if (start < 0) return
+        playbackGeneration++
+        playbackQueue = sequence.drop(start)
+        playSequence(playbackQueue, 0, playbackGeneration)
     }
 
     LaunchedEffect(channelId) {
@@ -231,7 +287,14 @@ fun ChannelChatScreen(channelId: String, title: String, topPadding: Dp, bottomPa
             contentPadding = PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            items(items) { t ->
+            var previousDay: String? = null
+            items.forEach { t ->
+                val day = Fmt.dayKey(t.createdAt)
+                if (day != previousDay) {
+                    item(key = "channel-day-$day") { ChannelDateDivider(Fmt.dayLabel(t.createdAt)) }
+                    previousDay = day
+                }
+                item(key = t.id) {
                 val mine = t.senderId == meId
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start) {
                     Column(
@@ -248,8 +311,9 @@ fun ChannelChatScreen(channelId: String, title: String, topPadding: Dp, bottomPa
                             t.fileKey != null -> MediaCard(MapeIcons.FileDoc, t.fileName ?: "Archivo", "Toca para abrir", t.fileSize, mine) { openExternally(t.fileKey) }
                             else -> Text(t.preview(), color = if (mine) MapeColors.White else MapeColors.Text, fontFamily = Outfit, fontSize = 15.sp)
                         }
-                        Text(Fmt.shortTime(t.createdAt), color = if (mine) MapeColors.TextOnDark else MapeColors.TextFaint, fontFamily = Outfit, fontSize = 10.sp, modifier = Modifier.padding(top = 3.dp).align(Alignment.End))
+                        Text(Fmt.clockTime(t.createdAt), color = if (mine) MapeColors.TextOnDark else MapeColors.TextFaint, fontFamily = Outfit, fontSize = 10.sp, modifier = Modifier.padding(top = 3.dp).align(Alignment.End))
                     }
+                }
                 }
             }
         }
@@ -345,6 +409,19 @@ fun ChannelChatScreen(channelId: String, title: String, topPadding: Dp, bottomPa
                 )
             }
         }
+    }
+}
+
+@Composable
+private fun ChannelDateDivider(label: String) {
+    Row(
+        Modifier.fillMaxWidth().padding(vertical = 5.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(9.dp),
+    ) {
+        Spacer(Modifier.weight(1f).height(1.dp).background(MapeColors.Border))
+        Text(label, color = MapeColors.TextFaint, fontFamily = Outfit, fontWeight = FontWeight.SemiBold, fontSize = 10.sp)
+        Spacer(Modifier.weight(1f).height(1.dp).background(MapeColors.Border))
     }
 }
 

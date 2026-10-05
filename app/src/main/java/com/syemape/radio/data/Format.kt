@@ -4,6 +4,7 @@ import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import java.util.Locale
 
 /** Utilidades de formato de fecha/hora para la UI (zona local). */
 object Fmt {
@@ -23,6 +24,28 @@ object Fmt {
             else -> "${d.dayOfMonth}/${d.monthValue}"
         }
     }
+
+    /** Fecha estable para agrupar los mensajes del chat por día. */
+    fun dayKey(iso: String?): String = instantOf(iso)?.atZone(zone)?.toLocalDate()?.toString() ?: "sin-fecha"
+
+    /** Encabezado de fecha para el historial: Hoy/Ayer o fecha completa en español. */
+    fun dayLabel(iso: String?): String {
+        val date = instantOf(iso)?.atZone(zone)?.toLocalDate() ?: return "Fecha no disponible"
+        val today = LocalDate.now(zone)
+        val spanish = Locale.forLanguageTag("es-PE")
+        val formatted = DateTimeFormatter.ofPattern("EEEE, d 'de' MMMM 'de' yyyy", spanish)
+            .format(date).replaceFirstChar { it.uppercase(spanish) }
+        return when (date) {
+            today -> "HOY · $formatted"
+            today.minusDays(1) -> "AYER · $formatted"
+            else -> formatted
+        }
+    }
+
+    /** Hora local exacta en formato de 24 horas. */
+    fun clockTime(iso: String?): String = instantOf(iso)?.let {
+        DateTimeFormatter.ofPattern("HH:mm", Locale.forLanguageTag("es-PE")).format(it.atZone(zone))
+    } ?: "--:--"
 
     /** Antigüedad relativa: "ahora", "hace 4 min", "hace 2 h". */
     fun hace(iso: String?): String {

@@ -575,10 +575,12 @@ object RadioManager {
                 info.getJSONObject("rtpParameters").toString(),
             )
             consumers[consumer.id] = consumer
-            ack("ms:resume", JSONObject().put("consumerId", consumer.id))
-            // Toma el audio del sistema (foco + modo llamada + ruta) para reproducir la voz.
+            // Selecciona la salida ANTES de abrir el consumer: al reanudarlo primero,
+            // el primer fragmento podía salir por el teléfono mientras enlazaba BT.
             consuming = true
             acquireAudioSession()
+            awaitSelectedCommunicationRoute()
+            ack("ms:resume", JSONObject().put("consumerId", consumer.id))
             ui.launch { speakerLabel = speaker }
         } catch (t: Throwable) {
             // No tumbar la app si falla crear/arrancar el consumer (p.ej. al entrar
@@ -859,6 +861,45 @@ object RadioManager {
     private var notePlayer: android.media.MediaPlayer? = null
     private var notePlayingId: String? = null
 
+    /** Espera brevemente a que Android aplique la salida de comunicación seleccionada. */
+    private fun awaitSelectedCommunicationRoute() {
+        if (speakerOn || android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.S) return
+        val am = sysAudio ?: return
+        val devices = am.availableCommunicationDevices
+        val target = devices.firstOrNull {
+            it.type == android.media.AudioDeviceInfo.TYPE_BLUETOOTH_SCO ||
+                it.type == android.media.AudioDeviceInfo.TYPE_BLE_HEADSET
+        } ?: devices.firstOrNull {
+            it.type in intArrayOf(
+                android.media.AudioDeviceInfo.TYPE_WIRED_HEADSET,
+                android.media.AudioDeviceInfo.TYPE_WIRED_HEADPHONES,
+                android.media.AudioDeviceInfo.TYPE_USB_HEADSET,
+            )
+        } ?: return
+        repeat(15) {
+            if (am.communicationDevice?.id == target.id) return
+            try { Thread.sleep(20) } catch (_: InterruptedException) { return }
+        }
+    }
+
+    /** Elige la salida Bluetooth/auricular para notas multimedia antes de iniciar el player. */
+    private fun preferredMediaOutput(am: AudioManager): android.media.AudioDeviceInfo? = runCatching {
+        val outputs = am.getDevices(AudioManager.GET_DEVICES_OUTPUTS).toList()
+        outputs.firstOrNull {
+            it.type == android.media.AudioDeviceInfo.TYPE_BLUETOOTH_A2DP ||
+                (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S && it.type in intArrayOf(
+                    android.media.AudioDeviceInfo.TYPE_BLE_HEADSET,
+                    android.media.AudioDeviceInfo.TYPE_BLE_SPEAKER,
+                ))
+        } ?: outputs.firstOrNull {
+            it.type in intArrayOf(
+                android.media.AudioDeviceInfo.TYPE_WIRED_HEADSET,
+                android.media.AudioDeviceInfo.TYPE_WIRED_HEADPHONES,
+                android.media.AudioDeviceInfo.TYPE_USB_HEADSET,
+            )
+        }
+    }.getOrNull()
+
     private fun audioMgr(): AudioManager? =
         sysAudio ?: (appRef?.getSystemService(Context.AUDIO_SERVICE) as? AudioManager)
 
@@ -885,14 +926,19 @@ object RadioManager {
     fun playLastVoiceNote(onState: (String?) -> Unit) {
         val note = lastVoiceNote ?: return
         val url = mediaUrlOf(note.audioKey) ?: return
-        playVoiceNote(url, note.id, onState)
+        playVoiceNote(url, note.id, onState = onState)
     }
 
     /**
      * Reproduce una nota de voz del chat como audio multimedia. [onState] avisa a
      * la UI qué id suena (o null al parar). Es toggle: mismo id => detiene.
      */
-    fun playVoiceNote(url: String, id: String, onState: (String?) -> Unit) {
+    fun playVoiceNote(
+        url: String,
+        id: String,
+        onCompletion: (() -> Unit)? = null,
+        onState: (String?) -> Unit,
+    ) {
         if (notePlayingId == id) { stopVoiceNote(onState); return }
         stopVoiceNote { } // corta cualquier otra nota en curso
         val am = audioMgr()
@@ -910,6 +956,13 @@ object RadioManager {
                 }
             }
             val mp = android.media.MediaPlayer()
+            if (!audioSessionActive && !talking && !consuming && !speakerOn && am != null) {
+                val target = preferredMediaOutput(am)
+                if (target != null) {
+                    val routed = runCatching { mp.setPreferredDevice(target) }.getOrDefault(false)
+                    android.util.Log.d(TAG, "voice note preferred output type=${target.type} selected=$routed")
+                }
+            }
             mp.setAudioAttributes(
                 android.media.AudioAttributes.Builder()
                     .setUsage(
@@ -922,11 +975,21 @@ object RadioManager {
             )
             mp.setDataSource(url)
             mp.setOnPreparedListener { it.start(); notePlayingId = id; ui.launch { onState(id) } }
-            mp.setOnCompletionListener { stopVoiceNote(onState) }
-            mp.setOnErrorListener { _, _, _ -> stopVoiceNote(onState); true }
+            mp.setOnCompletionListener {
+                stopVoiceNote(onState)
+                onCompletion?.invoke()
+            }
+            mp.setOnErrorListener { _, _, _ ->
+                stopVoiceNote(onState)
+                onCompletion?.invoke()
+                true
+            }
             mp.prepareAsync()
             notePlayer = mp
-        }.onFailure { stopVoiceNote(onState) }
+        }.onFailure {
+            stopVoiceNote(onState)
+            onCompletion?.invoke()
+        }
     }
 
     /** Detiene la nota de voz y libera la sesión cuando no hay otra voz de radio activa. */
@@ -1174,7 +1237,14 @@ object RadioManager {
     private fun isHeadsetConnected(): Boolean {
         val am = sysAudio ?: return false
         if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.S) return false
-        return runCatching { am.availableCommunicationDevices.any { isHeadsetType(it.type) } }.getOrDefault(false)
+        return runCatching {
+            am.availableCommunicationDevices.any { isHeadsetType(it.type) } ||
+                am.getDevices(AudioManager.GET_DEVICES_OUTPUTS).any {
+                    it.type == android.media.AudioDeviceInfo.TYPE_BLUETOOTH_A2DP ||
+                        it.type == android.media.AudioDeviceInfo.TYPE_BLE_HEADSET ||
+                        it.type == android.media.AudioDeviceInfo.TYPE_BLE_SPEAKER
+                }
+        }.getOrDefault(false)
     }
 
     /** Libera el audio del sistema cuando ya no hay voz (ni hablo ni recibo). */

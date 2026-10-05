@@ -41,7 +41,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Brush
@@ -223,18 +222,12 @@ private fun RadioHero(topPadding: Dp, onOpenSettings: () -> Unit, compact: Boole
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(9.dp),
         ) {
-            Box(
-                Modifier.size(if (compact) 42.dp else 54.dp).clip(CircleShape).background(Color.White)
-                    .border(1.dp, Color.White.copy(alpha = 0.8f), CircleShape),
-                contentAlignment = Alignment.Center,
-            ) {
-                Image(
-                    painter = painterResource(com.syemape.radio.R.drawable.mape_logo),
-                    contentDescription = "Logo MAPE",
-                    modifier = Modifier.fillMaxSize().clip(CircleShape).graphicsLayer { scaleX = 2.35f; scaleY = 2.35f },
-                    contentScale = ContentScale.Crop,
-                )
-            }
+            Image(
+                painter = painterResource(com.syemape.radio.R.drawable.radio_logo),
+                contentDescription = "Logo MAPE",
+                modifier = Modifier.size(if (compact) 54.dp else 64.dp),
+                contentScale = ContentScale.Fit,
+            )
             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Text("S & E MAPE E.I.R.L.", color = Color.White, fontFamily = Outfit, fontWeight = FontWeight.Bold, fontSize = 16.sp, maxLines = 1)
                 Text("Supervisión y Emergencias", color = Color.White.copy(alpha = 0.94f), fontFamily = Outfit, fontSize = 11.sp, maxLines = 1)
