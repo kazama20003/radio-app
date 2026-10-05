@@ -431,11 +431,16 @@ private fun MapPreview(
     }
 
     Box(
-        boxModifier.clip(RoundedCornerShape(28.dp)).background(Color(0xFFE7ECE9)),
+        boxModifier.clip(RoundedCornerShape(28.dp)).background(
+            if (MapeColors.darkMode) Color(0xFF202020) else Color(0xFFE7ECE9),
+        ),
     ) {
         com.google.maps.android.compose.GoogleMap(
             modifier = Modifier.fillMaxSize(),
             cameraPositionState = camera,
+            properties = com.google.maps.android.compose.MapProperties(
+                mapStyleOptions = if (MapeColors.darkMode) darkMapStyleOptions() else null,
+            ),
             uiSettings = com.google.maps.android.compose.MapUiSettings(zoomControlsEnabled = false, mapToolbarEnabled = false),
         ) {
             if (routePoints.size >= 2) {
@@ -500,6 +505,19 @@ private fun MapPreview(
         ) { Icon(MapeIcons.Locate, null, tint = MapeColors.Text, modifier = Modifier.size(20.dp)) }
     }
 }
+
+private fun darkMapStyleOptions() = com.google.android.gms.maps.model.MapStyleOptions(
+    """[
+      {"elementType":"geometry","stylers":[{"color":"#242424"}]},
+      {"elementType":"labels.text.fill","stylers":[{"color":"#d0d0d0"}]},
+      {"elementType":"labels.text.stroke","stylers":[{"color":"#181818"}]},
+      {"featureType":"road","elementType":"geometry","stylers":[{"color":"#3a3a3a"}]},
+      {"featureType":"road.highway","elementType":"geometry","stylers":[{"color":"#555555"}]},
+      {"featureType":"water","elementType":"geometry","stylers":[{"color":"#17232b"}]},
+      {"featureType":"poi","elementType":"geometry","stylers":[{"color":"#2d2d2d"}]},
+      {"featureType":"landscape","elementType":"geometry","stylers":[{"color":"#202020"}]}
+    ]""".trimIndent(),
+)
 
 @Composable
 private fun OperatorMarker(p: LivePerson, selected: Boolean, isMe: Boolean) {
