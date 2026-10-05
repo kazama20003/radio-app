@@ -223,10 +223,10 @@ private fun RadioHero(topPadding: Dp, onOpenSettings: () -> Unit, compact: Boole
             horizontalArrangement = Arrangement.spacedBy(9.dp),
         ) {
             Box(
-                Modifier.size(if (compact) 64.dp else 76.dp)
+                Modifier.size(if (compact) 74.dp else 88.dp)
                     .clip(CircleShape)
                     .background(Color.White)
-                    .padding(4.dp),
+                    .padding(5.dp),
                 contentAlignment = Alignment.Center,
             ) {
                 Image(
