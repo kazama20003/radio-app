@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
@@ -133,6 +134,7 @@ fun RadioScreen(
                     RadioManager.channelId?.let { onOpenChannelChat(it, RadioManager.channelName) }
                 },
             )
+            RadioMemberCard()
 
             val lastNote = RadioManager.lastVoiceNote
             var lastPlaying by remember { mutableStateOf(false) }
@@ -294,17 +296,26 @@ private fun RadioMemberCard() {
         Avatar(initialsOf(firstAlias), avatarColor(firstUser?.id?.takeIf { it.isNotBlank() } ?: firstAlias), size = 38.dp)
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Text("${RadioManager.members} CONECTADOS", color = RadioColors.TextMuted, fontFamily = Outfit, fontWeight = FontWeight.Bold, fontSize = 9.sp, maxLines = 1)
-            Row(
-                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                verticalAlignment = Alignment.CenterVertically,
+            FlowRow(
+                modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
             ) {
                 if (aliases.isEmpty()) {
-                    Text("Esperando apelativos…", color = RadioColors.Text, fontFamily = Outfit, fontWeight = FontWeight.SemiBold, fontSize = 12.sp, maxLines = 1)
+                    Text("Esperando conectados…", color = RadioColors.TextMuted, fontFamily = Outfit, fontWeight = FontWeight.SemiBold, fontSize = 10.sp, maxLines = 1)
                 } else {
-                    aliases.forEachIndexed { index, alias ->
-                        if (index > 0) Text("·", color = RadioColors.TextMuted, fontFamily = Outfit, fontSize = 12.sp)
-                        Text(alias, color = RadioColors.Text, fontFamily = Outfit, fontWeight = FontWeight.SemiBold, fontSize = 12.sp, maxLines = 1)
+                    aliases.forEach { alias ->
+                        Text(
+                            text = alias,
+                            modifier = Modifier.clip(CircleShape)
+                                .background(RadioColors.Ink.copy(alpha = 0.12f))
+                                .padding(horizontal = 7.dp, vertical = 3.dp),
+                            color = RadioColors.Text,
+                            fontFamily = Outfit,
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = 10.sp,
+                            maxLines = 1,
+                        )
                     }
                 }
             }
