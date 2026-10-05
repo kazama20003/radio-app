@@ -30,6 +30,16 @@ interface ApiService {
     @GET("users")
     suspend fun users(): List<AuthUser>
 
+    @POST("users/sync-personal")
+    suspend fun syncPersonal(): PersonalSyncResult
+
+    @retrofit2.http.PATCH("users/{id}")
+    suspend fun updateUser(@Path("id") id: String, @Body body: UpdateUserRequest): AuthUser
+
+    @Multipart
+    @POST("users/{id}/photo")
+    suspend fun uploadUserPhoto(@Path("id") id: String, @Part file: MultipartBody.Part): AuthUser
+
     @GET("settings")
     suspend fun settings(): AppSetting
 

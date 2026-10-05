@@ -6,12 +6,30 @@ data class AuthUser(
     val name: String? = null,
     val email: String? = null,
     val dni: String? = null,
+    val operatorCode: String? = null,
     val role: String? = null,            // ADMIN | SUPERVISOR | OPERADOR
     val nickname: String? = null,
     val avatarKey: String? = null,
     val photoUrl: String? = null,
     val positionTitle: String? = null,
+    val phone: String? = null,
     val shift: String? = null,           // MANANA | TARDE | NOCHE
+    val isActive: Boolean = true,
+    val isOnline: Boolean = false,
+)
+
+data class PersonalSyncResult(
+    val fetched: Int = 0,
+    val created: Int = 0,
+    val updated: Int = 0,
+    val skipped: Int = 0,
+    val deactivated: Int = 0,
+    val errors: List<String> = emptyList(),
+)
+
+data class UpdateUserRequest(
+    val role: String? = null,
+    val isActive: Boolean? = null,
 )
 
 /** Respuesta de /auth/login y /auth/refresh. */

@@ -76,4 +76,30 @@ object MediaUploader {
             tmp.delete()
         }
     }
+
+    /** Sube una foto al perfil de un usuario desde la galería (Cloudinary del backend). */
+    suspend fun uploadProfilePhoto(context: Context, userId: String, picked: PickedFile): AuthUser {
+        require(picked.mime.startsWith("image/")) { "Selecciona un archivo de imagen." }
+        val tmp = File.createTempFile("profile-photo", null, context.cacheDir)
+        try {
+            context.contentResolver.openInputStream(picked.uri)?.use { input ->
+                tmp.outputStream().buffered().use { out ->
+                    val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                    var total = 0L
+                    while (true) {
+                        val count = input.read(buffer)
+                        if (count < 0) break
+                        total += count
+                        if (total > 12L * 1024 * 1024) throw IllegalArgumentException("La foto supera el máximo de 12 MB.")
+                        out.write(buffer, 0, count)
+                    }
+                }
+            } ?: throw IllegalStateException("No se pudo abrir la foto")
+            val body = tmp.asRequestBody(picked.mime.toMediaTypeOrNull())
+            val part = MultipartBody.Part.createFormData("file", picked.name, body)
+            return Backend.api.uploadUserPhoto(userId, part)
+        } finally {
+            tmp.delete()
+        }
+    }
 }
