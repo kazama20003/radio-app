@@ -26,7 +26,7 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -59,10 +59,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.syemape.radio.data.RadioManager
-import com.syemape.radio.ui.Avatar
 import com.syemape.radio.ui.MapeIcons
-import com.syemape.radio.ui.avatarColor
-import com.syemape.radio.ui.initialsOf
 import com.syemape.radio.ui.pressScale
 import com.syemape.radio.ui.theme.Outfit
 
@@ -129,11 +126,6 @@ fun RadioScreen(
                 }
             }
 
-            RadioChannelCard(compact = true,
-                onOpen = {
-                    RadioManager.channelId?.let { onOpenChannelChat(it, RadioManager.channelName) }
-                },
-            )
             RadioMemberCard()
 
             val lastNote = RadioManager.lastVoiceNote
@@ -201,7 +193,7 @@ fun RadioScreen(
             ) {
                 // Phones with a short display get a smaller PTT target instead of
                 // pushing the microphone below the bottom navigation bar.
-                val micSize = minOf(maxWidth, maxHeight, 220.dp)
+                val micSize = minOf(maxWidth, maxHeight, 250.dp)
                 if (micSize > 0.dp) HoldTalkButton(size = micSize)
             }
         }
@@ -211,7 +203,7 @@ fun RadioScreen(
 @Composable
 private fun RadioHero(topPadding: Dp, onOpenSettings: () -> Unit, compact: Boolean = false) {
     Box(
-        Modifier.fillMaxWidth().height(if (compact) 146.dp else 184.dp).clip(RoundedCornerShape(bottomStart = 24.dp, bottomEnd = 24.dp)),
+        Modifier.fillMaxWidth().height(if (compact) 126.dp else 184.dp).clip(RoundedCornerShape(bottomStart = 24.dp, bottomEnd = 24.dp)),
     ) {
         Image(
             painter = painterResource(com.syemape.radio.R.drawable.radio_hero),
@@ -230,10 +222,10 @@ private fun RadioHero(topPadding: Dp, onOpenSettings: () -> Unit, compact: Boole
             horizontalArrangement = Arrangement.spacedBy(9.dp),
         ) {
             Box(
-                Modifier.size(if (compact) 74.dp else 88.dp)
+                Modifier.size(if (compact) 64.dp else 88.dp)
                     .clip(CircleShape)
                     .background(Color.White)
-                    .padding(5.dp),
+                    .padding(3.dp),
                 contentAlignment = Alignment.Center,
             ) {
                 Image(
@@ -261,74 +253,66 @@ private fun RadioHero(topPadding: Dp, onOpenSettings: () -> Unit, compact: Boole
 }
 
 @Composable
-private fun RadioChannelCard(compact: Boolean = false, onOpen: () -> Unit) {
-    val brandRed = Color(0xFFD71920)
+private fun RadioMemberCard() {
+    val users = RadioManager.connectedUsers
+    val aliases = users.map { user ->
+        user.nickname?.trim()?.takeIf { it.isNotEmpty() }
+            ?: user.name?.trim()?.takeIf { it.isNotEmpty() }
+            ?: "Operador"
+    }
     Row(
-        Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp)).background(RadioColors.Card)
-            .border(1.dp, RadioColors.Border, RoundedCornerShape(20.dp))
-            .clickable(onClick = onOpen).padding(if (compact) 8.dp else 13.dp),
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(15.dp)).background(RadioColors.Card)
+            .border(1.dp, RadioColors.Border, RoundedCornerShape(15.dp)).padding(horizontal = 10.dp, vertical = 5.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Box(
-            Modifier.size(38.dp).clip(RoundedCornerShape(15.dp)).background(RadioColors.Ink),
-            contentAlignment = Alignment.Center,
-        ) { Icon(MapeIcons.Radio, null, tint = RadioColors.White, modifier = Modifier.size(21.dp)) }
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(1.dp)) {
-            Text("CANAL · ${RadioManager.channelName.uppercase()}", color = RadioColors.TextMuted, fontFamily = Outfit, fontWeight = FontWeight.Bold, fontSize = if (compact) 8.sp else 10.sp, maxLines = 1)
-            Text(RadioManager.channelName, color = RadioColors.Text, fontFamily = Outfit, fontWeight = FontWeight.Bold, fontSize = if (compact) 17.sp else 22.sp, maxLines = 1)
-            Text("${RadioManager.members} conectados · ${if (RadioManager.connected) "En vivo" else "Conectando…"}", color = RadioColors.TextMuted, fontFamily = Outfit, fontSize = if (compact) 9.sp else 11.sp, maxLines = 1)
-        }
-        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(3.dp)) {
-            Box(Modifier.size(12.dp).clip(CircleShape).background(if (RadioManager.connected) Color(0xFF20B15A) else Color(0xFFE7A820)))
-            Text(if (RadioManager.connected) "EN VIVO" else "CONECTA", color = brandRed, fontFamily = Outfit, fontWeight = FontWeight.Bold, fontSize = 9.sp)
+        OnlinePulseDot(Modifier.size(8.dp))
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(
+                "${RadioManager.members} CONECTADOS · ${if (RadioManager.connected) "EN VIVO" else "CONECTANDO"}",
+                color = RadioColors.TextMuted, fontFamily = Outfit, fontWeight = FontWeight.Bold, fontSize = 9.sp, maxLines = 1,
+            )
+            if (aliases.isEmpty()) {
+                Text("Esperando conectados…", color = RadioColors.TextMuted, fontFamily = Outfit, fontWeight = FontWeight.SemiBold, fontSize = 10.sp, maxLines = 1)
+            } else {
+                LazyRow(
+                    modifier = Modifier.fillMaxWidth().height(28.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    items(aliases) { alias -> ConnectedAlias(alias) }
+                }
+            }
         }
     }
 }
 
 @Composable
-private fun RadioMemberCard() {
-    val users = RadioManager.connectedUsers
-    val aliases = users.mapNotNull { user ->
-        user.nickname?.trim()?.takeIf { it.isNotEmpty() }
-            ?: user.name?.trim()?.takeIf { it.isNotEmpty() }
-    }
-    val firstUser = users.firstOrNull()
-    val firstAlias = aliases.firstOrNull() ?: "Equipo de radio"
+private fun ConnectedAlias(alias: String) {
     Row(
-        Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(RadioColors.Card)
-            .border(1.dp, RadioColors.Border, RoundedCornerShape(16.dp)).padding(horizontal = 12.dp, vertical = 8.dp),
+        Modifier.clip(CircleShape).background(RadioColors.Ink.copy(alpha = 0.12f))
+            .padding(horizontal = 8.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        horizontalArrangement = Arrangement.spacedBy(5.dp),
     ) {
-        Avatar(initialsOf(firstAlias), avatarColor(firstUser?.id?.takeIf { it.isNotBlank() } ?: firstAlias), size = 38.dp)
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Text("${RadioManager.members} CONECTADOS", color = RadioColors.TextMuted, fontFamily = Outfit, fontWeight = FontWeight.Bold, fontSize = 9.sp, maxLines = 1)
-            if (aliases.isEmpty()) {
-                Text("Esperando conectados…", color = RadioColors.TextMuted, fontFamily = Outfit, fontWeight = FontWeight.SemiBold, fontSize = 10.sp, maxLines = 1)
-            } else {
-                LazyColumn(
-                    modifier = Modifier.fillMaxWidth().height(42.dp),
-                    verticalArrangement = Arrangement.spacedBy(2.dp),
-                ) {
-                    items(aliases) { alias ->
-                        Text(
-                            text = alias,
-                            modifier = Modifier.clip(CircleShape)
-                                .background(RadioColors.Ink.copy(alpha = 0.12f))
-                                .padding(horizontal = 7.dp, vertical = 3.dp),
-                            color = RadioColors.Text,
-                            fontFamily = Outfit,
-                            fontWeight = FontWeight.SemiBold,
-                            fontSize = 10.sp,
-                            maxLines = 1,
-                        )
-                    }
-                }
-            }
-        }
-        Icon(MapeIcons.Truck, null, tint = RadioColors.TextMuted, modifier = Modifier.size(19.dp))
+        OnlinePulseDot(Modifier.size(6.dp))
+        Text(alias, color = RadioColors.Text, fontFamily = Outfit, fontWeight = FontWeight.SemiBold, fontSize = 10.sp, maxLines = 1)
     }
+}
+
+@Composable
+private fun OnlinePulseDot(modifier: Modifier = Modifier) {
+    val transition = rememberInfiniteTransition(label = "radio-online-dot")
+    val alpha by transition.animateFloat(
+        initialValue = 0.45f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(850, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse,
+        ),
+        label = "radio-online-alpha",
+    )
+    Box(modifier.clip(CircleShape).background(Color(0xFF22C55E).copy(alpha = alpha)))
 }
 
 @Composable
