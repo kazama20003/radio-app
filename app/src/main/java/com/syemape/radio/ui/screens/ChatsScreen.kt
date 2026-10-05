@@ -87,7 +87,7 @@ fun ChatsScreen(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween,
             ) {
-                Text("Chats", color = MapeColors.Ink, fontFamily = Outfit, fontWeight = FontWeight.Medium, fontSize = 30.sp)
+                Text("Chats", color = MapeColors.Text, fontFamily = Outfit, fontWeight = FontWeight.Medium, fontSize = 30.sp)
             }
         }
         item { Spacer(Modifier.height(10.dp)) }
@@ -103,7 +103,7 @@ fun ChatsScreen(
                 val chName = ch.name ?: "Canal"
                 val chTitle = listOfNotNull(ch.name, ch.description).joinToString(" · ").ifBlank { "Canal" }
                 Row(
-                    Modifier.fillMaxWidth().clip(RoundedCornerShape(22.dp)).background(MapeColors.White)
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(22.dp)).background(MapeColors.Card)
                         .pressScale { onOpenChannelChat(ch.id, chTitle) }
                         .padding(horizontal = 14.dp, vertical = 12.dp),
                     verticalAlignment = Alignment.CenterVertically,
@@ -113,7 +113,7 @@ fun ChatsScreen(
                     }
                     Spacer(Modifier.width(12.dp))
                     Column(Modifier.weight(1f)) {
-                        Text(chName, color = MapeColors.Ink, fontFamily = Outfit, fontWeight = FontWeight.SemiBold, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(chName, color = MapeColors.Text, fontFamily = Outfit, fontWeight = FontWeight.SemiBold, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         Spacer(Modifier.height(3.dp))
                         Text("Canal de radio · ${ch.memberCount} en el canal", color = MapeColors.Red, fontFamily = Outfit, fontWeight = FontWeight.Medium, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
@@ -130,7 +130,7 @@ fun ChatsScreen(
             }
         }
         if (result == null) {
-            item { Box(Modifier.fillMaxWidth().padding(top = 40.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator(color = MapeColors.Ink) } }
+            item { Box(Modifier.fillMaxWidth().padding(top = 40.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator(color = MapeColors.Text) } }
         } else if (convos.isEmpty()) {
             item {
                 Text(
@@ -142,7 +142,7 @@ fun ChatsScreen(
         }
         items(convos) { chat ->
             Row(
-                Modifier.fillMaxWidth().clip(RoundedCornerShape(22.dp)).background(MapeColors.White).pressScale { onOpenChat(chat.id, chat.name) }.padding(horizontal = 14.dp, vertical = 12.dp),
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(22.dp)).background(MapeColors.Card).pressScale { onOpenChat(chat.id, chat.name) }.padding(horizontal = 14.dp, vertical = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 if (chat.group) {
@@ -154,7 +154,7 @@ fun ChatsScreen(
                 }
                 Spacer(Modifier.width(12.dp))
                 Column(Modifier.weight(1f)) {
-                    Text(chat.name, color = MapeColors.Ink, fontFamily = Outfit, fontWeight = FontWeight.SemiBold, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(chat.name, color = MapeColors.Text, fontFamily = Outfit, fontWeight = FontWeight.SemiBold, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     Spacer(Modifier.height(3.dp))
                     Text(chat.preview, color = MapeColors.TextMuted, fontFamily = Outfit, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }

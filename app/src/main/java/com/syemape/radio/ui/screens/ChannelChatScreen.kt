@@ -212,15 +212,15 @@ fun ChannelChatScreen(channelId: String, title: String, topPadding: Dp, bottomPa
 
     Column(Modifier.fillMaxSize().background(MapeColors.Bg)) {
         Row(
-            Modifier.fillMaxWidth().background(MapeColors.White).padding(top = topPadding).padding(horizontal = 12.dp, vertical = 10.dp),
+            Modifier.fillMaxWidth().background(MapeColors.Card).padding(top = topPadding).padding(horizontal = 12.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             Box(Modifier.size(42.dp).clip(CircleShape).pressScale { onBack() }, contentAlignment = Alignment.Center) {
-                Icon(MapeIcons.ArrowLeft, null, tint = MapeColors.Ink, modifier = Modifier.size(24.dp))
+                Icon(MapeIcons.ArrowLeft, null, tint = MapeColors.Text, modifier = Modifier.size(24.dp))
             }
             Column {
-                Text(title, color = MapeColors.Ink, fontFamily = Outfit, fontWeight = FontWeight.SemiBold, fontSize = 18.sp)
+                Text(title, color = MapeColors.Text, fontFamily = Outfit, fontWeight = FontWeight.SemiBold, fontSize = 18.sp)
                 Text("Chat del canal", color = MapeColors.TextMuted, fontFamily = Outfit, fontSize = 12.sp)
             }
         }
@@ -235,7 +235,7 @@ fun ChannelChatScreen(channelId: String, title: String, topPadding: Dp, bottomPa
                 val mine = t.senderId == meId
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start) {
                     Column(
-                        Modifier.widthIn(max = 280.dp).clip(RoundedCornerShape(18.dp)).background(if (mine) MapeColors.Ink else MapeColors.White).padding(horizontal = 14.dp, vertical = 10.dp),
+                        Modifier.widthIn(max = 280.dp).clip(RoundedCornerShape(18.dp)).background(if (mine) MapeColors.Ink else MapeColors.Card).padding(horizontal = 14.dp, vertical = 10.dp),
                     ) {
                         if (!mine) {
                             Text(t.sender?.nickname ?: t.sender?.name ?: "—", color = MapeColors.Red, fontFamily = Outfit, fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
@@ -246,7 +246,7 @@ fun ChannelChatScreen(channelId: String, title: String, topPadding: Dp, bottomPa
                             t.imageKey != null -> ImageBubble(urlOf(t.imageKey)) { urlOf(t.imageKey)?.let { fullscreenImage = it } }
                             t.videoKey != null -> MediaCard(MapeIcons.Video, "Video", t.fileName ?: "Toca para reproducir", t.fileSize, mine) { openExternally(t.videoKey) }
                             t.fileKey != null -> MediaCard(MapeIcons.FileDoc, t.fileName ?: "Archivo", "Toca para abrir", t.fileSize, mine) { openExternally(t.fileKey) }
-                            else -> Text(t.preview(), color = if (mine) MapeColors.White else MapeColors.Ink, fontFamily = Outfit, fontSize = 15.sp)
+                            else -> Text(t.preview(), color = if (mine) MapeColors.White else MapeColors.Text, fontFamily = Outfit, fontSize = 15.sp)
                         }
                         Text(Fmt.shortTime(t.createdAt), color = if (mine) MapeColors.TextOnDark else MapeColors.TextFaint, fontFamily = Outfit, fontSize = 10.sp, modifier = Modifier.padding(top = 3.dp).align(Alignment.End))
                     }
@@ -255,7 +255,7 @@ fun ChannelChatScreen(channelId: String, title: String, topPadding: Dp, bottomPa
         }
 
         Row(
-            Modifier.fillMaxWidth().background(MapeColors.White).padding(horizontal = 12.dp, vertical = 10.dp).padding(bottom = bottomPadding),
+            Modifier.fillMaxWidth().background(MapeColors.Card).padding(horizontal = 12.dp, vertical = 10.dp).padding(bottom = bottomPadding),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
@@ -267,10 +267,10 @@ fun ChannelChatScreen(channelId: String, title: String, topPadding: Dp, bottomPa
                 ) {
                     if (uploading) {
                         androidx.compose.material3.CircularProgressIndicator(
-                            modifier = Modifier.size(20.dp), strokeWidth = 2.dp, color = MapeColors.Ink,
+                            modifier = Modifier.size(20.dp), strokeWidth = 2.dp, color = MapeColors.Text,
                         )
                     } else {
-                        Icon(MapeIcons.Paperclip, null, tint = MapeColors.Ink, modifier = Modifier.size(22.dp))
+                        Icon(MapeIcons.Paperclip, null, tint = MapeColors.Text, modifier = Modifier.size(22.dp))
                     }
                 }
                 DropdownMenu(expanded = attachMenu, onDismissRequest = { attachMenu = false }) {
@@ -299,7 +299,7 @@ fun ChannelChatScreen(channelId: String, title: String, topPadding: Dp, bottomPa
                 if (draft.isEmpty()) Text("Mensaje al canal…", color = MapeColors.TextFaint, fontFamily = Outfit, fontSize = 15.sp)
                 BasicTextField(
                     value = draft, onValueChange = { draft = it.take(2000) },
-                    textStyle = TextStyle(fontFamily = Outfit, fontSize = 15.sp, color = MapeColors.Ink),
+                    textStyle = TextStyle(fontFamily = Outfit, fontSize = 15.sp, color = MapeColors.Text),
                     cursorBrush = SolidColor(MapeColors.Ink),
                     modifier = Modifier.fillMaxWidth(),
                 )
@@ -368,7 +368,7 @@ private fun VoiceBubble(t: RadioTransmission, mine: Boolean, playing: Boolean, o
         }
         Text(
             "Nota de voz" + (t.durationSec?.let { " · ${it.toInt()}s" } ?: ""),
-            color = if (mine) MapeColors.White else MapeColors.Ink,
+            color = if (mine) MapeColors.White else MapeColors.Text,
             fontFamily = Outfit, fontWeight = FontWeight.Medium, fontSize = 15.sp,
         )
     }

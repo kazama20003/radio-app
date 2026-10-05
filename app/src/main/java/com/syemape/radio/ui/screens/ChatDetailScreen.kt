@@ -99,14 +99,14 @@ fun ChatDetailScreen(conversationId: String, title: String, topPadding: Dp, bott
     Column(Modifier.fillMaxSize().background(MapeColors.Bg)) {
         // Cabecera
         Row(
-            Modifier.fillMaxWidth().background(MapeColors.White).padding(top = topPadding).padding(horizontal = 12.dp, vertical = 10.dp),
+            Modifier.fillMaxWidth().background(MapeColors.Card).padding(top = topPadding).padding(horizontal = 12.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             Box(Modifier.size(42.dp).clip(CircleShape).pressScale { onBack() }, contentAlignment = Alignment.Center) {
-                Icon(MapeIcons.ArrowLeft, null, tint = MapeColors.Ink, modifier = Modifier.size(24.dp))
+                Icon(MapeIcons.ArrowLeft, null, tint = MapeColors.Text, modifier = Modifier.size(24.dp))
             }
-            Text(title, color = MapeColors.Ink, fontFamily = Outfit, fontWeight = FontWeight.SemiBold, fontSize = 18.sp)
+            Text(title, color = MapeColors.Text, fontFamily = Outfit, fontWeight = FontWeight.SemiBold, fontSize = 18.sp)
         }
 
         // Mensajes
@@ -125,7 +125,7 @@ fun ChatDetailScreen(conversationId: String, title: String, topPadding: Dp, bott
                     Column(
                         Modifier.widthIn(max = 280.dp)
                             .clip(RoundedCornerShape(18.dp))
-                            .background(if (mine) MapeColors.Ink else MapeColors.White)
+                            .background(if (mine) MapeColors.Ink else MapeColors.Card)
                             .padding(horizontal = 14.dp, vertical = 10.dp),
                     ) {
                         if (!mine) {
@@ -137,7 +137,7 @@ fun ChatDetailScreen(conversationId: String, title: String, topPadding: Dp, bott
                         }
                         Text(
                             Fmt.preview(m).ifBlank { m.body ?: "" },
-                            color = if (mine) MapeColors.White else MapeColors.Ink,
+                            color = if (mine) MapeColors.White else MapeColors.Text,
                             fontFamily = Outfit, fontSize = 15.sp,
                         )
                         Text(
@@ -153,7 +153,7 @@ fun ChatDetailScreen(conversationId: String, title: String, topPadding: Dp, bott
 
         // Barra de entrada
         Row(
-            Modifier.fillMaxWidth().background(MapeColors.White).padding(horizontal = 12.dp, vertical = 10.dp).padding(bottom = bottomPadding),
+            Modifier.fillMaxWidth().background(MapeColors.Card).padding(horizontal = 12.dp, vertical = 10.dp).padding(bottom = bottomPadding),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
@@ -165,7 +165,7 @@ fun ChatDetailScreen(conversationId: String, title: String, topPadding: Dp, bott
                 BasicTextField(
                     value = draft,
                     onValueChange = { draft = it.take(2000) },
-                    textStyle = TextStyle(fontFamily = Outfit, fontSize = 15.sp, color = MapeColors.Ink),
+                    textStyle = TextStyle(fontFamily = Outfit, fontSize = 15.sp, color = MapeColors.Text),
                     cursorBrush = SolidColor(MapeColors.Ink),
                     modifier = Modifier.fillMaxWidth(),
                 )

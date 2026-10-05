@@ -188,7 +188,7 @@ fun MapScreen(topPadding: Dp) {
                     }
                 }
                 Spacer(Modifier.height(4.dp))
-                Text("Operadores en ruta", color = MapeColors.Ink, fontFamily = Outfit, fontWeight = FontWeight.Medium, fontSize = 30.sp)
+                Text("Operadores en ruta", color = MapeColors.Text, fontFamily = Outfit, fontWeight = FontWeight.Medium, fontSize = 30.sp)
             }
             FilterRow(
                 listOf(
@@ -292,18 +292,18 @@ private fun NavPanel(
         val ctx = androidx.compose.ui.platform.LocalContext.current
         if (target.lastLat != null && target.lastLng != null) {
             Box(
-                Modifier.size(44.dp).clip(CircleShape).background(MapeColors.White).pressScale {
+                Modifier.size(44.dp).clip(CircleShape).background(MapeColors.Card).pressScale {
                     openNativeNav(ctx, target.lastLat, target.lastLng)
                 },
                 contentAlignment = Alignment.Center,
-            ) { Icon(MapeIcons.Pin, null, tint = MapeColors.Ink, modifier = Modifier.size(20.dp)) }
+            ) { Icon(MapeIcons.Pin, null, tint = MapeColors.Text, modifier = Modifier.size(20.dp)) }
         }
         if (route != null) {
             // Ver indicaciones
             Box(
-                Modifier.size(44.dp).clip(CircleShape).background(MapeColors.White).pressScale { onShowSteps() },
+                Modifier.size(44.dp).clip(CircleShape).background(MapeColors.Card).pressScale { onShowSteps() },
                 contentAlignment = Alignment.Center,
-            ) { Icon(MapeIcons.Sliders, null, tint = MapeColors.Ink, modifier = Modifier.size(20.dp)) }
+            ) { Icon(MapeIcons.Sliders, null, tint = MapeColors.Text, modifier = Modifier.size(20.dp)) }
             // Cancelar ruta
             Box(
                 Modifier.size(44.dp).clip(CircleShape).background(MapeColors.Red).pressScale { onCancel() },
@@ -327,7 +327,7 @@ private fun NavPanel(
 private fun StepsSheet(info: DirectionsResult, onClose: () -> Unit) {
     androidx.compose.ui.window.Dialog(onDismissRequest = onClose) {
         Column(
-            Modifier.fillMaxWidth().heightIn(max = 520.dp).clip(RoundedCornerShape(22.dp)).background(MapeColors.White).padding(18.dp),
+            Modifier.fillMaxWidth().heightIn(max = 520.dp).clip(RoundedCornerShape(22.dp)).background(MapeColors.Card).padding(18.dp),
         ) {
             Row(
                 Modifier.fillMaxWidth(),
@@ -335,7 +335,7 @@ private fun StepsSheet(info: DirectionsResult, onClose: () -> Unit) {
                 horizontalArrangement = Arrangement.SpaceBetween,
             ) {
                 Column {
-                    Text("Indicaciones", color = MapeColors.Ink, fontFamily = Outfit, fontWeight = FontWeight.SemiBold, fontSize = 18.sp)
+                    Text("Indicaciones", color = MapeColors.Text, fontFamily = Outfit, fontWeight = FontWeight.SemiBold, fontSize = 18.sp)
                     Text(
                         listOfNotNull(info.distanceText, info.durationText).joinToString(" · "),
                         color = MapeColors.TextMuted, fontFamily = Outfit, fontSize = 13.sp,
@@ -344,7 +344,7 @@ private fun StepsSheet(info: DirectionsResult, onClose: () -> Unit) {
                 Box(
                     Modifier.size(38.dp).clip(CircleShape).background(MapeColors.Bg).pressScale { onClose() },
                     contentAlignment = Alignment.Center,
-                ) { Icon(MapeIcons.Close, null, tint = MapeColors.Ink, modifier = Modifier.size(18.dp)) }
+                ) { Icon(MapeIcons.Close, null, tint = MapeColors.Text, modifier = Modifier.size(18.dp)) }
             }
             Spacer(Modifier.height(10.dp))
             LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -356,9 +356,9 @@ private fun StepsSheet(info: DirectionsResult, onClose: () -> Unit) {
                         Box(
                             Modifier.size(34.dp).clip(CircleShape).background(MapeColors.Bg),
                             contentAlignment = Alignment.Center,
-                        ) { Icon(MapeIcons.Navigation, null, tint = MapeColors.Ink, modifier = Modifier.size(16.dp)) }
+                        ) { Icon(MapeIcons.Navigation, null, tint = MapeColors.Text, modifier = Modifier.size(16.dp)) }
                         Column(Modifier.weight(1f)) {
-                            Text(step.instruction, color = MapeColors.Ink, fontFamily = Outfit, fontSize = 14.sp)
+                            Text(step.instruction, color = MapeColors.Text, fontFamily = Outfit, fontSize = 14.sp)
                             if (!step.distanceText.isNullOrBlank()) {
                                 Text(step.distanceText!!, color = MapeColors.TextMuted, fontFamily = Outfit, fontSize = 12.sp)
                             }
@@ -483,7 +483,7 @@ private fun MapPreview(
             Text("En vivo · ${people.size} en línea", color = MapeColors.White, fontFamily = Outfit, fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
         }
         Box(
-            Modifier.align(Alignment.TopEnd).padding(12.dp).size(44.dp).clip(CircleShape).background(MapeColors.White)
+            Modifier.align(Alignment.TopEnd).padding(12.dp).size(44.dp).clip(CircleShape).background(MapeColors.Card)
                 .pressScale(enabled = myPosition != null) {
                     myPosition?.let { person ->
                         cameraScope.launch {
@@ -497,7 +497,7 @@ private fun MapPreview(
                     }
                 },
             contentAlignment = Alignment.Center,
-        ) { Icon(MapeIcons.Locate, null, tint = MapeColors.Ink, modifier = Modifier.size(20.dp)) }
+        ) { Icon(MapeIcons.Locate, null, tint = MapeColors.Text, modifier = Modifier.size(20.dp)) }
     }
 }
 
@@ -540,7 +540,7 @@ private fun PersonCard(p: LivePerson, isMe: Boolean, selected: Boolean, onSelect
     val speed = (p.lastSpeedKmh ?: 0.0).toInt()
     val hasLocation = p.lastLat != null && p.lastLng != null
     Row(
-        Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(MapeColors.White)
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(MapeColors.Card)
             .then(if (selected) Modifier.border(1.5.dp, MapeColors.Red, RoundedCornerShape(18.dp)) else Modifier)
             .pressScale { onSelect() }.padding(horizontal = 12.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -548,7 +548,7 @@ private fun PersonCard(p: LivePerson, isMe: Boolean, selected: Boolean, onSelect
     ) {
         Avatar(initialsOf(p.name ?: "?"), avatarColor(p.id), size = 44.dp)
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Text(name, color = MapeColors.Ink, fontFamily = Outfit, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+            Text(name, color = MapeColors.Text, fontFamily = Outfit, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
             Text(
                 if (hasLocation) "En vivo · $speed km/h" else "Sin ubicación todavía",
                 color = MapeColors.TextMuted, fontFamily = Outfit, fontSize = 12.sp,

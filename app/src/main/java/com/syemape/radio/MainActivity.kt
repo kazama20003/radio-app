@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -22,6 +23,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.core.view.WindowCompat
 import com.syemape.radio.data.AuthStatus
 import com.syemape.radio.data.Backend
 import com.syemape.radio.data.SessionManager
@@ -47,8 +49,15 @@ class MainActivity : ComponentActivity() {
         SessionManager.bootstrap()
         enableEdgeToEdge()
         setContent {
-            MapeTheme {
-                AppRoot()
+            var darkMode by remember { mutableStateOf(com.syemape.radio.data.Prefs.darkMode) }
+            SideEffect {
+                WindowCompat.getInsetsController(window, window.decorView).apply {
+                    isAppearanceLightStatusBars = !darkMode
+                    isAppearanceLightNavigationBars = !darkMode
+                }
+            }
+            MapeTheme(darkMode = darkMode) {
+                AppRoot(onDarkModeChanged = { darkMode = it })
             }
         }
     }
@@ -62,7 +71,7 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-private fun AppRoot() {
+private fun AppRoot(onDarkModeChanged: (Boolean) -> Unit) {
     val topInset = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
     val bottomInset = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
     val scope = rememberCoroutineScope()
@@ -80,7 +89,7 @@ private fun AppRoot() {
         AuthStatus.Loading -> Box(
             Modifier.fillMaxSize().background(MapeColors.Bg),
             contentAlignment = Alignment.Center,
-        ) { CircularProgressIndicator(color = MapeColors.Ink) }
+        ) { CircularProgressIndicator(color = MapeColors.Text) }
 
         AuthStatus.Unauthenticated -> LoginScreen(
             topPadding = topInset,
@@ -148,7 +157,7 @@ private fun AppRoot() {
             if (sub != null) {
                 when (sub) {
                     "account" -> com.syemape.radio.ui.screens.AccountScreen(topInset) { openSub = null }
-                    "settings" -> com.syemape.radio.ui.screens.AppSettingsScreen(topInset) { openSub = null }
+                    "settings" -> com.syemape.radio.ui.screens.AppSettingsScreen(topInset, onDarkModeChanged) { openSub = null }
                     "notifications" -> com.syemape.radio.ui.screens.NotificationsScreen(topInset) { openSub = null }
                     "admin-users" -> com.syemape.radio.ui.screens.AdminUsersScreen(topInset) { openSub = null }
                     else -> { openSub = null }

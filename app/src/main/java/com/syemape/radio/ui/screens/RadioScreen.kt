@@ -73,7 +73,7 @@ fun RadioScreen(topPadding: Dp, bottomPadding: Dp = 0.dp, onOpenChannelChat: (St
         onDispose { } // la radio sigue viva en 2º plano; se detiene al cerrar sesión
     }
     Column(
-        Modifier.fillMaxSize().background(MapeColors.White).padding(top = topPadding + 14.dp, start = 24.dp, end = 24.dp, bottom = bottomPadding + 96.dp),
+        Modifier.fillMaxSize().background(MapeColors.Card).padding(top = topPadding + 14.dp, start = 24.dp, end = 24.dp, bottom = bottomPadding + 96.dp),
     ) {
         // ---- Barra superior: radio + canales (tipo FM/AM) ----
         Row(
@@ -83,7 +83,7 @@ fun RadioScreen(topPadding: Dp, bottomPadding: Dp = 0.dp, onOpenChannelChat: (St
         ) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Box(Modifier.size(44.dp).clip(CircleShape).background(MapeColors.Bg), contentAlignment = Alignment.Center) {
-                    Icon(MapeIcons.Radio, null, tint = MapeColors.Ink, modifier = Modifier.size(22.dp))
+                    Icon(MapeIcons.Radio, null, tint = MapeColors.Text, modifier = Modifier.size(22.dp))
                 }
                 // Indicador de señal / internet.
                 val online = RadioManager.netOnline
@@ -120,7 +120,7 @@ fun RadioScreen(topPadding: Dp, bottomPadding: Dp = 0.dp, onOpenChannelChat: (St
         // ---- Nombre de canal grande (editorial) ----
         Text(
             RadioManager.channelName,
-            color = MapeColors.Ink, fontFamily = Outfit, fontWeight = FontWeight.Bold, fontSize = 46.sp, lineHeight = 48.sp,
+            color = MapeColors.Text, fontFamily = Outfit, fontWeight = FontWeight.Bold, fontSize = 46.sp, lineHeight = 48.sp,
         )
         Spacer(Modifier.height(6.dp))
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -160,7 +160,7 @@ fun RadioScreen(topPadding: Dp, bottomPadding: Dp = 0.dp, onOpenChannelChat: (St
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
                         Avatar(initialsOf(label), avatarColor(u.id.ifBlank { label }), size = 30.dp)
-                        Text(label, color = MapeColors.Ink, fontFamily = Outfit, fontWeight = FontWeight.Medium, fontSize = 13.sp, maxLines = 1)
+                        Text(label, color = MapeColors.Text, fontFamily = Outfit, fontWeight = FontWeight.Medium, fontSize = 13.sp, maxLines = 1)
                     }
                 }
             }
@@ -183,11 +183,11 @@ fun RadioScreen(topPadding: Dp, bottomPadding: Dp = 0.dp, onOpenChannelChat: (St
                 ) {
                     Icon(
                         if (lastPlaying) MapeIcons.Pause else MapeIcons.Play, null,
-                        tint = if (lastPlaying) MapeColors.White else MapeColors.Ink, modifier = Modifier.size(18.dp),
+                        tint = if (lastPlaying) MapeColors.White else MapeColors.Text, modifier = Modifier.size(18.dp),
                     )
                     Text(
                         "Última nota" + (lastNote.durationSec?.let { " · ${it.toInt()}s" } ?: ""),
-                        color = if (lastPlaying) MapeColors.White else MapeColors.Ink,
+                        color = if (lastPlaying) MapeColors.White else MapeColors.Text,
                         fontFamily = Outfit, fontWeight = FontWeight.SemiBold, fontSize = 13.sp, maxLines = 1,
                     )
                 }
@@ -214,7 +214,7 @@ fun RadioScreen(topPadding: Dp, bottomPadding: Dp = 0.dp, onOpenChannelChat: (St
         }
         Text(label, color = MapeColors.Red, fontFamily = Outfit, fontWeight = FontWeight.Bold, fontSize = 12.sp, letterSpacing = 0.6.sp)
         Spacer(Modifier.height(2.dp))
-        Text(name, color = MapeColors.Ink, fontFamily = Outfit, fontWeight = FontWeight.SemiBold, fontSize = 24.sp)
+        Text(name, color = MapeColors.Text, fontFamily = Outfit, fontWeight = FontWeight.SemiBold, fontSize = 24.sp)
 
         Spacer(Modifier.weight(1f))
 

@@ -28,6 +28,10 @@ object Prefs {
         get() = p?.getBoolean("speakerOn", true) ?: true
         set(v) { p?.edit()?.putBoolean("speakerOn", v)?.apply() }
 
+    var darkMode: Boolean
+        get() = p?.getBoolean("darkMode", false) ?: false
+        set(v) { p?.edit()?.putBoolean("darkMode", v)?.apply() }
+
     /** Volumen de la radio (0..1) sobre STREAM_VOICE_CALL. Por defecto al máximo. */
     var callVolume: Float
         get() = p?.getFloat("callVolume", 1f) ?: 1f

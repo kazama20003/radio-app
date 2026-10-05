@@ -382,17 +382,34 @@ object RadioManager {
     }
 
     @Volatile private var setupDone = false
+    @Volatile private var lastSetupAttemptAt = 0L
 
     private fun setupMediasoup() {
         // Listo solo si ambos transports existen; si no, reintenta lo que falte.
         if (setupDone && sendTransport != null && recvTransport != null) return
+        val now = System.currentTimeMillis()
+        // El watchdog y los eventos de socket pueden pedirlo a la vez. Coalescer
+        // duplicados evita llenar el executor con montajes/acks obsoletos.
+        if (now - lastSetupAttemptAt < 1200) return
+        lastSetupAttemptAt = now
         val t0 = System.currentTimeMillis()
         val cid = channelId ?: return
         val f = factory ?: return
-        val caps = ack("ms:rtpCapabilities") as? JSONObject
+        val caps = ack("ms:rtpCapabilities", timeoutMs = 1500) as? JSONObject
         if (caps == null) { android.util.Log.w(TAG, "setupMediasoup: sin rtpCapabilities (socket.connected=${socket.connected()})"); return }
+        if (!caps.optBoolean("ready", true)) {
+            android.util.Log.i(TAG, "setupMediasoup: SFU aún inicia; se reintentará")
+            return
+        }
+        val routerCaps = caps.optJSONObject("rtpCapabilities") ?: caps
         val dev = device ?: Device(f).also { device = it }
-        if (!dev.loaded) runCatching { dev.load(caps.toString()) }
+        if (!dev.loaded) {
+            val loaded = runCatching { dev.load(routerCaps.toString()) }
+            if (loaded.isFailure) {
+                android.util.Log.e(TAG, "setupMediasoup: no se pudieron cargar capacidades RTP", loaded.exceptionOrNull())
+                return
+            }
+        }
 
         // recvTransport
         if (recvTransport == null) {
@@ -764,7 +781,7 @@ object RadioManager {
     }
 
     /**
-     * Reproduce una nota de voz del chat fuerte, como la radio. [onState] avisa a
+     * Reproduce una nota de voz del chat como audio multimedia. [onState] avisa a
      * la UI qué id suena (o null al parar). Es toggle: mismo id => detiene.
      */
     fun playVoiceNote(url: String, id: String, onState: (String?) -> Unit) {
@@ -773,16 +790,25 @@ object RadioManager {
         val am = audioMgr()
         runCatching {
             if (am != null) {
-                // Refresca la preferencia según el dispositivo conectado y toma la
-                // misma ruta de comunicación Bluetooth/cable/altavoz que usa la radio.
-                autoSelectOutput()
-                acquireAudioSession()
+                // Las notas son reproducción multimedia: así Android usa perfil A2DP
+                // y volumen de medios (icono de música), sin abrir la ruta del micrófono.
+                // Si hay radio en vivo, conservamos su sesión de comunicación.
+                if (audioSessionActive || talking || consuming) acquireAudioSession()
+                else {
+                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+                        runCatching { am.clearCommunicationDevice() }
+                    }
+                    am.mode = AudioManager.MODE_NORMAL
+                }
             }
-            applyStreamVolume() // sube STREAM_VOICE_CALL al volumen de la radio
             val mp = android.media.MediaPlayer()
             mp.setAudioAttributes(
                 android.media.AudioAttributes.Builder()
-                    .setUsage(android.media.AudioAttributes.USAGE_VOICE_COMMUNICATION)
+                    .setUsage(
+                        if (audioSessionActive || talking || consuming)
+                            android.media.AudioAttributes.USAGE_VOICE_COMMUNICATION
+                        else android.media.AudioAttributes.USAGE_MEDIA,
+                    )
                     .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SPEECH)
                     .build()
             )
@@ -802,7 +828,7 @@ object RadioManager {
         notePlayer = null
         notePlayingId = null
         ui.launch { onState(null) }
-        releaseAudioSession()
+        if (audioSessionActive || talking || consuming) releaseAudioSession()
     }
 
     @Volatile private var levelPolling = false

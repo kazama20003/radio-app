@@ -85,7 +85,7 @@ fun ProfileScreen(topPadding: Dp, onLogout: () -> Unit, onOpen: (String) -> Unit
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween,
             ) {
-                Text("Perfil", color = MapeColors.Ink, fontFamily = Outfit, fontWeight = FontWeight.Medium, fontSize = 30.sp)
+                Text("Perfil", color = MapeColors.Text, fontFamily = Outfit, fontWeight = FontWeight.Medium, fontSize = 30.sp)
                 RoundIconButton(MapeIcons.User, bg = MapeColors.Ink, tint = MapeColors.White)
             }
         }
@@ -129,7 +129,7 @@ fun ProfileScreen(topPadding: Dp, onLogout: () -> Unit, onOpen: (String) -> Unit
                     .fillMaxWidth()
                     .padding(bottom = 8.dp)
                     .clip(RoundedCornerShape(20.dp))
-                    .background(MapeColors.White)
+                    .background(MapeColors.Card)
                     .pressScale { if (r.danger) onLogout() else onOpen(r.route) }
                     .padding(horizontal = 14.dp, vertical = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -164,7 +164,7 @@ fun ProfileScreen(topPadding: Dp, onLogout: () -> Unit, onOpen: (String) -> Unit
 @Composable
 private fun ProfileStat(value: String, label: String, numColor: Color, modifier: Modifier) {
     Column(
-        modifier.clip(RoundedCornerShape(20.dp)).background(MapeColors.White).padding(horizontal = 14.dp, vertical = 12.dp),
+        modifier.clip(RoundedCornerShape(20.dp)).background(MapeColors.Card).padding(horizontal = 14.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(2.dp),
     ) {
         Text(value, color = numColor, fontFamily = Outfit, fontWeight = FontWeight.SemiBold, fontSize = 22.sp)

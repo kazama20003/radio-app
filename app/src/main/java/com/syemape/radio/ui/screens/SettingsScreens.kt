@@ -52,14 +52,14 @@ import kotlinx.coroutines.launch
 private fun SubScreen(title: String, topPadding: Dp, onBack: () -> Unit, content: @Composable () -> Unit) {
     Column(Modifier.fillMaxSize().background(MapeColors.Bg)) {
         Row(
-            Modifier.fillMaxWidth().background(MapeColors.White).padding(top = topPadding).padding(horizontal = 12.dp, vertical = 12.dp),
+            Modifier.fillMaxWidth().background(MapeColors.Card).padding(top = topPadding).padding(horizontal = 12.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             Box(Modifier.size(42.dp).clip(CircleShape).pressScale { onBack() }, contentAlignment = Alignment.Center) {
-                Icon(MapeIcons.ArrowLeft, null, tint = MapeColors.Ink, modifier = Modifier.size(24.dp))
+                Icon(MapeIcons.ArrowLeft, null, tint = MapeColors.Text, modifier = Modifier.size(24.dp))
             }
-            Text(title, color = MapeColors.Ink, fontFamily = Outfit, fontWeight = FontWeight.SemiBold, fontSize = 20.sp)
+            Text(title, color = MapeColors.Text, fontFamily = Outfit, fontWeight = FontWeight.SemiBold, fontSize = 20.sp)
         }
         content()
     }
@@ -68,11 +68,11 @@ private fun SubScreen(title: String, topPadding: Dp, onBack: () -> Unit, content
 @Composable
 private fun ToggleRow(label: String, sub: String, checked: Boolean, onToggle: (Boolean) -> Unit) {
     Row(
-        Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(MapeColors.White).padding(horizontal = 16.dp, vertical = 12.dp),
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(MapeColors.Card).padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Text(label, color = MapeColors.Ink, fontFamily = Outfit, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+            Text(label, color = MapeColors.Text, fontFamily = Outfit, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
             if (sub.isNotBlank()) Text(sub, color = MapeColors.TextFaint, fontFamily = Outfit, fontSize = 12.sp)
         }
         Switch(
@@ -85,11 +85,11 @@ private fun ToggleRow(label: String, sub: String, checked: Boolean, onToggle: (B
 @Composable
 private fun InfoRow(label: String, value: String) {
     Column(
-        Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(MapeColors.White).padding(horizontal = 16.dp, vertical = 12.dp),
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(MapeColors.Card).padding(horizontal = 16.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(2.dp),
     ) {
         Text(label, color = MapeColors.TextFaint, fontFamily = Outfit, fontSize = 12.sp)
-        Text(value.ifBlank { "—" }, color = MapeColors.Ink, fontFamily = Outfit, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+        Text(value.ifBlank { "—" }, color = MapeColors.Text, fontFamily = Outfit, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
     }
 }
 
@@ -123,10 +123,13 @@ fun AccountScreen(topPadding: Dp, onBack: () -> Unit) {
 }
 
 @Composable
-fun AppSettingsScreen(topPadding: Dp, onBack: () -> Unit) {
+fun AppSettingsScreen(topPadding: Dp, onDarkModeChanged: (Boolean) -> Unit, onBack: () -> Unit) {
     val scope = rememberCoroutineScope()
     var s by remember { mutableStateOf<AppSetting?>(null) }
-    LaunchedEffect(Unit) { s = runCatching { Backend.api.settings() }.getOrNull() ?: AppSetting() }
+    LaunchedEffect(Unit) {
+        val remote = runCatching { Backend.api.settings() }.getOrNull() ?: AppSetting()
+        s = remote.copy(darkMode = com.syemape.radio.data.Prefs.darkMode)
+    }
     fun patch(field: String, value: Boolean, apply: (AppSetting) -> AppSetting) {
         s = s?.let(apply)
         scope.launch { runCatching { Backend.api.updateSettings(mapOf(field to value)) } }
@@ -140,7 +143,11 @@ fun AppSettingsScreen(topPadding: Dp, onBack: () -> Unit) {
                 item { ToggleRow("Mapa de tránsito", "Muestra el tráfico en el mapa", cur.transitMap) { patch("transitMap", it) { c -> c.copy(transitMap = it) } } }
                 item { ToggleRow("Sonido de radio", "Beeps al transmitir/recibir", cur.radioSound) { patch("radioSound", it) { c -> c.copy(radioSound = it) } } }
                 item { ToggleRow("Alertas críticas", "Avisos de alertas importantes", cur.criticalAlerts) { patch("criticalAlerts", it) { c -> c.copy(criticalAlerts = it) } } }
-                item { ToggleRow("Modo oscuro", "Tema oscuro de la app", cur.darkMode) { patch("darkMode", it) { c -> c.copy(darkMode = it) } } }
+                item { ToggleRow("Modo oscuro", "Tema oscuro de la app", cur.darkMode) {
+                    com.syemape.radio.data.Prefs.darkMode = it
+                    onDarkModeChanged(it)
+                    patch("darkMode", it) { c -> c.copy(darkMode = it) }
+                } }
             }
         }
     }
@@ -183,10 +190,10 @@ fun AdminUsersScreen(topPadding: Dp, onBack: () -> Unit) {
             else {
                 item { Text("${list.size} usuarios", color = MapeColors.TextFaint, fontFamily = Outfit, fontSize = 13.sp, modifier = Modifier.padding(start = 4.dp, bottom = 2.dp)) }
                 items(list) { u ->
-                    Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(MapeColors.White).padding(14.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(MapeColors.Card).padding(14.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         Avatar(initialsOf(u.name ?: "?"), avatarColor(u.id), size = 44.dp)
                         Column(Modifier.weight(1f)) {
-                            Text(u.nickname?.takeIf { it.isNotBlank() } ?: u.name ?: "—", color = MapeColors.Ink, fontFamily = Outfit, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+                            Text(u.nickname?.takeIf { it.isNotBlank() } ?: u.name ?: "—", color = MapeColors.Text, fontFamily = Outfit, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
                             Text(
                                 listOfNotNull(
                                     when (u.role) { "ADMIN" -> "Administrador"; "SUPERVISOR" -> "Supervisor"; else -> "Operador" },

@@ -103,7 +103,7 @@ fun LoginScreen(
             ) {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Start) {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Box(Modifier.size(44.dp).clip(RoundedCornerShape(12.dp)).background(MapeColors.White), contentAlignment = Alignment.Center) {
+                        Box(Modifier.size(44.dp).clip(RoundedCornerShape(12.dp)).background(MapeColors.Card), contentAlignment = Alignment.Center) {
                             androidx.compose.foundation.Image(
                                 painter = androidx.compose.ui.res.painterResource(R.drawable.mape_logo),
                                 contentDescription = "Mape",
@@ -143,7 +143,7 @@ fun LoginScreen(
         ) {
             // Segmento
             Row(
-                Modifier.fillMaxWidth().clip(RoundedCornerShape(27.dp)).background(MapeColors.White).padding(5.dp),
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(27.dp)).background(MapeColors.Card).padding(5.dp),
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 SegmentButton("Administrador", MapeIcons.User, admin, Modifier.weight(1f)) { admin = true; email = ""; validationError = null }
@@ -224,7 +224,7 @@ fun LoginScreen(
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
             Row(
-                Modifier.clip(RoundedCornerShape(20.dp)).background(MapeColors.White).padding(start = 10.dp, end = 14.dp, top = 10.dp, bottom = 10.dp),
+                Modifier.clip(RoundedCornerShape(20.dp)).background(MapeColors.Card).padding(start = 10.dp, end = 14.dp, top = 10.dp, bottom = 10.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
             ) {
@@ -237,7 +237,7 @@ fun LoginScreen(
                 }
                 Text(
                     buildAnnotatedString {
-                        withStyle(androidx.compose.ui.text.SpanStyle(fontWeight = FontWeight.SemiBold, color = MapeColors.Ink)) { append("12 operadores") }
+                        withStyle(androidx.compose.ui.text.SpanStyle(fontWeight = FontWeight.SemiBold, color = MapeColors.Text)) { append("12 operadores") }
                         withStyle(androidx.compose.ui.text.SpanStyle(fontWeight = FontWeight.Normal, color = Color(0xFF4A4A4A))) { append(" conectados ahora") }
                     },
                     fontFamily = Outfit,
@@ -247,7 +247,7 @@ fun LoginScreen(
             Text(
                 buildAnnotatedString {
                     withStyle(androidx.compose.ui.text.SpanStyle(color = MapeColors.TextFaint)) { append("¿Nuevo en el equipo? ") }
-                    withStyle(androidx.compose.ui.text.SpanStyle(color = MapeColors.Ink, fontWeight = FontWeight.SemiBold)) { append("Solicita acceso") }
+                    withStyle(androidx.compose.ui.text.SpanStyle(color = MapeColors.Text, fontWeight = FontWeight.SemiBold)) { append("Solicita acceso") }
                 },
                 fontFamily = Outfit,
                 fontSize = 13.sp,
@@ -273,7 +273,7 @@ private fun InputField(
     onTrailing: () -> Unit = {},
 ) {
     Row(
-        Modifier.fillMaxWidth().height(56.dp).clip(RoundedCornerShape(28.dp)).background(MapeColors.White).padding(horizontal = 18.dp),
+        Modifier.fillMaxWidth().height(56.dp).clip(RoundedCornerShape(28.dp)).background(MapeColors.Card).padding(horizontal = 18.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
@@ -286,7 +286,7 @@ private fun InputField(
                 value = value,
                 onValueChange = onValue,
                 singleLine = true,
-                textStyle = TextStyle(fontFamily = Outfit, fontSize = 15.sp, color = MapeColors.Ink),
+                textStyle = TextStyle(fontFamily = Outfit, fontSize = 15.sp, color = MapeColors.Text),
                 cursorBrush = SolidColor(MapeColors.Ink),
                 keyboardOptions = KeyboardOptions(keyboardType = keyboardType),
                 visualTransformation = if (password) PasswordVisualTransformation() else androidx.compose.ui.text.input.VisualTransformation.None,
@@ -295,7 +295,7 @@ private fun InputField(
         }
         if (trailing != null) {
             Box(Modifier.pressScale { onTrailing() }) {
-                Icon(trailing, null, tint = MapeColors.Ink, modifier = Modifier.size(20.dp))
+                Icon(trailing, null, tint = MapeColors.Text, modifier = Modifier.size(20.dp))
             }
         }
     }

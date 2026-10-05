@@ -108,16 +108,16 @@ fun AlertsScreen(topPadding: Dp, onGoMap: () -> Unit = {}, onGoRadio: () -> Unit
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween,
             ) {
-                Text("Alertas", color = MapeColors.Ink, fontFamily = Outfit, fontWeight = FontWeight.Medium, fontSize = 30.sp)
+                Text("Alertas", color = MapeColors.Text, fontFamily = Outfit, fontWeight = FontWeight.Medium, fontSize = 30.sp)
                 Row(
-                    Modifier.height(40.dp).clip(CircleShape).background(MapeColors.White)
+                    Modifier.height(40.dp).clip(CircleShape).background(MapeColors.Card)
                         .pressScale { scope.launch { runCatching { Backend.api.markAlertsRead() }; reload() } }
                         .padding(horizontal = 14.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
-                    Icon(MapeIcons.DoubleCheck, null, tint = MapeColors.Ink, modifier = Modifier.size(15.dp))
-                    Text("Marcar leídas", color = MapeColors.Ink, fontFamily = Outfit, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                    Icon(MapeIcons.DoubleCheck, null, tint = MapeColors.Text, modifier = Modifier.size(15.dp))
+                    Text("Marcar leídas", color = MapeColors.Text, fontFamily = Outfit, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
                 }
             }
         }
@@ -151,7 +151,7 @@ fun AlertsScreen(topPadding: Dp, onGoMap: () -> Unit = {}, onGoRadio: () -> Unit
 private fun AlertCard(a: Alert, onGoMap: () -> Unit, onGoRadio: () -> Unit) {
     val critical = a.severity == "CRITICA"
     Row(
-        Modifier.fillMaxWidth().padding(bottom = 8.dp).clip(RoundedCornerShape(22.dp)).background(MapeColors.White)
+        Modifier.fillMaxWidth().padding(bottom = 8.dp).clip(RoundedCornerShape(22.dp)).background(MapeColors.Card)
             .then(if (critical) Modifier.border(1.5.dp, MapeColors.Red, RoundedCornerShape(22.dp)) else Modifier)
             .padding(14.dp),
         horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -171,7 +171,7 @@ private fun AlertCard(a: Alert, onGoMap: () -> Unit, onGoRadio: () -> Unit) {
                 }
                 Text(Fmt.hace(a.createdAt), color = MapeColors.TextFaint, fontFamily = Outfit, fontSize = 12.sp)
             }
-            Text(a.subtitle(), color = MapeColors.Ink, fontFamily = Outfit, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+            Text(a.subtitle(), color = MapeColors.Text, fontFamily = Outfit, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
             if (!a.locationLabel.isNullOrBlank()) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                     Icon(MapeIcons.Pin, null, tint = MapeColors.TextMuted, modifier = Modifier.size(13.dp))
@@ -190,7 +190,7 @@ private fun AlertCard(a: Alert, onGoMap: () -> Unit, onGoRadio: () -> Unit) {
                     Row(
                         Modifier.height(38.dp).clip(CircleShape).background(MapeColors.Bg).pressScale { onGoMap() }.padding(horizontal = 14.dp),
                         verticalAlignment = Alignment.CenterVertically,
-                    ) { Text("Ver en mapa", color = MapeColors.Ink, fontFamily = Outfit, fontWeight = FontWeight.SemiBold, fontSize = 13.sp) }
+                    ) { Text("Ver en mapa", color = MapeColors.Text, fontFamily = Outfit, fontWeight = FontWeight.SemiBold, fontSize = 13.sp) }
                 }
             }
         }
@@ -206,7 +206,7 @@ private fun EmptyState(loading: Boolean) {
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Box(
-            Modifier.size(80.dp).clip(CircleShape).background(MapeColors.White),
+            Modifier.size(80.dp).clip(CircleShape).background(MapeColors.Card),
             contentAlignment = Alignment.Center,
         ) {
             Icon(
@@ -219,7 +219,7 @@ private fun EmptyState(loading: Boolean) {
         Spacer(Modifier.height(18.dp))
         Text(
             if (loading) "Cargando alertas…" else "Todo en orden",
-            color = MapeColors.Ink, fontFamily = Outfit, fontWeight = FontWeight.SemiBold, fontSize = 18.sp,
+            color = MapeColors.Text, fontFamily = Outfit, fontWeight = FontWeight.SemiBold, fontSize = 18.sp,
         )
         if (!loading) {
             Spacer(Modifier.height(6.dp))
