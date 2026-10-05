@@ -146,13 +146,22 @@ object RadioManager {
             val o = args.firstOrNull() as? JSONObject ?: return@Listener
             if (o.optString("channelId") == channelId) {
                 val count = o.optInt("count", members)
-                val arr = o.optJSONArray("users")
+                val arr = o.optJSONArray("users") ?: o.optJSONArray("participants")
                 val list = if (arr != null) (0 until arr.length()).mapNotNull { i ->
                     arr.optJSONObject(i)?.let { obj ->
-                        // Android convierte el JSON null al texto "null": lo tratamos como null real.
-                        fun str(k: String): String? =
-                            if (obj.isNull(k)) null else obj.optString(k).takeIf { s -> s.isNotBlank() && s != "null" }
-                        MiniUser(id = obj.optString("id"), name = str("name"), nickname = str("nickname"))
+                        // Algunos despliegues mandan el perfil anidado y otros usan "apelativo".
+                        val profile = obj.optJSONObject("user") ?: obj.optJSONObject("profile") ?: obj
+                        fun str(source: JSONObject, vararg keys: String): String? = keys.firstNotNullOfOrNull { key ->
+                            if (source.isNull(key)) null else source.optString(key).trim()
+                                .takeIf { it.isNotEmpty() && it != "null" }
+                        }
+                        val id = str(obj, "id", "userId") ?: str(profile, "id", "userId") ?: ""
+                        val own = meUser()?.takeIf { it.id == id }
+                        MiniUser(
+                            id = id,
+                            name = str(profile, "name", "fullName", "nombre") ?: own?.name,
+                            nickname = str(profile, "nickname", "apelativo", "alias") ?: own?.nickname,
+                        )
                     }
                 } else null
                 ui.launch { members = count; if (list != null) connectedUsers = list }
@@ -597,15 +606,17 @@ object RadioManager {
         }
     }
 
-    /** Chirrido breve de grillo al abrir/cerrar PTT; suena por la ruta de voz activa. */
+    /** Chirrido de grillo al abrir/cerrar PTT; reproducción aparte para no retrasar la voz. */
     private fun beep(durationMs: Int) {
         if (Prefs.radioSound == false) return
         Thread({
-            runCatching {
-                val sampleRate = 22_050
-                val chirpMs = 19
-                val gapMs = 24
-                val chirpCount = if (durationMs >= 140) 4 else 3
+            var track: android.media.AudioTrack? = null
+            try {
+                val sampleRate = 24_000
+                // Un trillito de varias notas cortas, más reconocible y audible que el pitido tenue anterior.
+                val chirpMs = if (durationMs >= 140) 36 else 28
+                val gapMs = 22
+                val chirpCount = if (durationMs >= 140) 6 else 3
                 val chirpSamples = sampleRate * chirpMs / 1000
                 val periodSamples = sampleRate * (chirpMs + gapMs) / 1000
                 val totalSamples = periodSamples * (chirpCount - 1) + chirpSamples
@@ -614,13 +625,13 @@ object RadioManager {
                     val within = i % periodSamples
                     if (within >= chirpSamples) continue
                     val edge = minOf(within, chirpSamples - within - 1)
-                    val envelope = (edge / (sampleRate * 0.0025f)).coerceIn(0f, 1f)
-                    val progress = within.toFloat() / chirpSamples
-                    val frequency = 4_600.0 + 520.0 * progress + 180.0 * kotlin.math.sin(progress * Math.PI)
+                    val envelope = (edge / (sampleRate * 0.003f)).coerceIn(0f, 1f)
+                    val progress = within.toDouble() / chirpSamples
+                    val frequency = 3_200.0 + 1_050.0 * progress + 260.0 * kotlin.math.sin(progress * Math.PI)
                     val sample = kotlin.math.sin(2.0 * Math.PI * frequency * within / sampleRate)
-                    pcm[i] = (sample * envelope * 0.38 * Short.MAX_VALUE).toInt().toShort()
+                    pcm[i] = (sample * envelope * 0.88 * Short.MAX_VALUE).toInt().toShort()
                 }
-                val track = android.media.AudioTrack(
+                track = android.media.AudioTrack(
                     AudioManager.STREAM_VOICE_CALL,
                     sampleRate,
                     android.media.AudioFormat.CHANNEL_OUT_MONO,
@@ -629,11 +640,21 @@ object RadioManager {
                     android.media.AudioTrack.MODE_STATIC,
                 )
                 if (track.state == android.media.AudioTrack.STATE_INITIALIZED) {
-                    track.write(pcm, 0, pcm.size)
-                    track.play()
-                    Thread.sleep((totalSamples * 1000L / sampleRate + 50).coerceAtLeast(90))
+                    track.setVolume(1.0f)
+                    val written = track.write(pcm, 0, pcm.size)
+                    if (written > 0) {
+                        track.play()
+                        Thread.sleep(totalSamples * 1000L / sampleRate + 60)
+                    } else {
+                        android.util.Log.w(TAG, "No se pudo escribir el chirrido PTT: $written")
+                    }
+                } else {
+                    android.util.Log.w(TAG, "AudioTrack no inicializado para chirrido PTT")
                 }
-                track.release()
+            } catch (e: Exception) {
+                android.util.Log.e(TAG, "Error al reproducir el chirrido PTT", e)
+            } finally {
+                runCatching { track?.release() }
             }
         }, "mape-cricket-chirp").apply { isDaemon = true }.start()
     }
