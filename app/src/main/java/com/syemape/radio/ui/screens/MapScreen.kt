@@ -77,30 +77,37 @@ private fun decodePolyline(encoded: String): List<LatLng> {
     val len = encoded.length
     var lat = 0
     var lng = 0
-    while (index < len) {
-        var b: Int
+    fun readDelta(): Int? {
         var shift = 0
         var result = 0
-        do {
-            b = encoded[index++].code - 63
+        while (index < len) {
+            val b = encoded[index++].code - 63
+            if (b !in 0..63 || shift > 30 || (shift == 30 && (b and 0x1f) > 1)) return null
             result = result or ((b and 0x1f) shl shift)
+            if (b < 0x20) {
+                return if (result and 1 != 0) (result shr 1).inv() else result shr 1
+            }
             shift += 5
-        } while (b >= 0x20)
-        val dlat = if (result and 1 != 0) (result shr 1).inv() else result shr 1
-        lat += dlat
-        shift = 0
-        result = 0
-        do {
-            b = encoded[index++].code - 63
-            result = result or ((b and 0x1f) shl shift)
-            shift += 5
-        } while (b >= 0x20)
-        val dlng = if (result and 1 != 0) (result shr 1).inv() else result shr 1
-        lng += dlng
+        }
+        return null // Truncated coordinate.
+    }
+
+    while (index < len) {
+        val dlat = readDelta() ?: return emptyList()
+        val dlng = readDelta() ?: return emptyList()
+        val nextLat = lat.toLong() + dlat
+        val nextLng = lng.toLong() + dlng
+        if (nextLat !in -9_000_000L..9_000_000L || nextLng !in -18_000_000L..18_000_000L) return emptyList()
+        lat = nextLat.toInt()
+        lng = nextLng.toInt()
         poly.add(LatLng(lat / 1e5, lng / 1e5))
     }
     return poly
 }
+
+private fun isValidCoordinate(lat: Double?, lng: Double?): Boolean =
+    lat != null && lng != null && lat.isFinite() && lng.isFinite() &&
+        lat in -90.0..90.0 && lng in -180.0..180.0
 
 @Composable
 fun MapScreen(topPadding: Dp) {
@@ -137,18 +144,27 @@ fun MapScreen(topPadding: Dp) {
         val me = people.firstOrNull { it.id == meId }
         val oLat = me?.lastLat
         val oLng = me?.lastLng
-        if (oLat == null || oLng == null) { toast("Aún no tenemos tu ubicación"); return }
+        if (!isValidCoordinate(oLat, oLng)) { toast("Aún no tenemos tu ubicación"); return }
+        val originLat = oLat ?: return
+        val originLng = oLng ?: return
         val dLat = target.lastLat
         val dLng = target.lastLng
-        if (dLat == null || dLng == null) { toast("Ese operador no tiene ubicación"); return }
+        if (!isValidCoordinate(dLat, dLng)) { toast("Ese operador no tiene ubicación"); return }
+        val destinationLat = dLat ?: return
+        val destinationLng = dLng ?: return
         scope.launch {
             routing = true
-            val res = runCatching { Backend.api.directions(oLat, oLng, dLat, dLng) }.getOrNull()
+            val res = runCatching { Backend.api.directions(originLat, originLng, destinationLat, destinationLng) }.getOrNull()
             routing = false
             if (res == null || !res.ok || res.overviewPolyline.isNullOrBlank()) {
                 toast("No se pudo trazar la ruta"); return@launch
             }
-            routePoints = decodePolyline(res.overviewPolyline!!)
+            val decoded = decodePolyline(res.overviewPolyline.orEmpty())
+            if (decoded.size < 2) {
+                toast("La ruta recibida no es válida; intenta de nuevo")
+                return@launch
+            }
+            routePoints = decoded
             routeInfo = res
             routeFor = target.id
         }
@@ -382,8 +398,8 @@ private fun MapPreview(
     boxModifier: Modifier,
 ) {
     val cameraScope = rememberCoroutineScope()
-    val located = people.filter { it.lastLat != null && it.lastLng != null }
-    val firstUnit = units.firstOrNull { it.lat != null && it.lng != null }
+    val located = people.filter { isValidCoordinate(it.lastLat, it.lastLng) }
+    val firstUnit = units.firstOrNull { isValidCoordinate(it.lat, it.lng) }
     val firstLat = located.firstOrNull()?.lastLat ?: firstUnit?.lat
     val firstLng = located.firstOrNull()?.lastLng ?: firstUnit?.lng
     val camera = com.google.maps.android.compose.rememberCameraPositionState {
@@ -454,7 +470,7 @@ private fun MapPreview(
                 val pos = com.google.android.gms.maps.model.LatLng(p.lastLat!!, p.lastLng!!)
                 val st = com.google.maps.android.compose.rememberMarkerState(key = p.id, position = pos)
                 st.position = pos
-                com.google.maps.android.compose.MarkerComposable(
+            com.google.maps.android.compose.MarkerComposable(
                     p.id, p.id == selectedId, p.id == meId, p.nickname ?: "", p.avatarKey ?: "",
                     state = st,
                     title = p.nickname?.takeIf { it.isNotBlank() } ?: p.name ?: "Operador",
@@ -464,7 +480,7 @@ private fun MapPreview(
                     OperatorMarker(p, selected = p.id == selectedId, isMe = p.id == meId)
                 }
             }
-            units.filter { it.lat != null && it.lng != null }.forEach { u ->
+            units.filter { isValidCoordinate(it.lat, it.lng) }.forEach { u ->
                 val pos = com.google.android.gms.maps.model.LatLng(u.lat!!, u.lng!!)
                 // Reasignar la posición en cada recomposición: si no, el marcador se
                 // quedaba congelado en el primer punto (desfase en el mapa en vivo).
