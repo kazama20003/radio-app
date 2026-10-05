@@ -278,18 +278,36 @@ private fun RadioChannelCard(compact: Boolean = false, onOpen: () -> Unit) {
 
 @Composable
 private fun RadioMemberCard() {
-    val member = RadioManager.connectedUsers.firstOrNull()
-    val title = member?.nickname?.takeIf { it.isNotBlank() } ?: member?.name?.takeIf { it.isNotBlank() } ?: "Equipo de radio"
+    val users = RadioManager.connectedUsers
+    val aliases = users.mapNotNull { user ->
+        user.nickname?.trim()?.takeIf { it.isNotEmpty() }
+            ?: user.name?.trim()?.takeIf { it.isNotEmpty() }
+    }
+    val firstUser = users.firstOrNull()
+    val firstAlias = aliases.firstOrNull() ?: "Equipo de radio"
     Row(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(RadioColors.Card)
             .border(1.dp, RadioColors.Border, RoundedCornerShape(16.dp)).padding(horizontal = 12.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        Avatar(initialsOf(title), avatarColor(member?.id ?: title), size = 38.dp)
-        Column(Modifier.weight(1f)) {
-            Text(title, color = RadioColors.Text, fontFamily = Outfit, fontWeight = FontWeight.SemiBold, fontSize = 13.sp, maxLines = 1)
-            Text("${RadioManager.members} en el canal", color = RadioColors.TextMuted, fontFamily = Outfit, fontSize = 10.sp)
+        Avatar(initialsOf(firstAlias), avatarColor(firstUser?.id?.takeIf { it.isNotBlank() } ?: firstAlias), size = 38.dp)
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text("${RadioManager.members} CONECTADOS", color = RadioColors.TextMuted, fontFamily = Outfit, fontWeight = FontWeight.Bold, fontSize = 9.sp, maxLines = 1)
+            Row(
+                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                if (aliases.isEmpty()) {
+                    Text("Esperando apelativos…", color = RadioColors.Text, fontFamily = Outfit, fontWeight = FontWeight.SemiBold, fontSize = 12.sp, maxLines = 1)
+                } else {
+                    aliases.forEachIndexed { index, alias ->
+                        if (index > 0) Text("·", color = RadioColors.TextMuted, fontFamily = Outfit, fontSize = 12.sp)
+                        Text(alias, color = RadioColors.Text, fontFamily = Outfit, fontWeight = FontWeight.SemiBold, fontSize = 12.sp, maxLines = 1)
+                    }
+                }
+            }
         }
         Icon(MapeIcons.Truck, null, tint = RadioColors.TextMuted, modifier = Modifier.size(19.dp))
     }
