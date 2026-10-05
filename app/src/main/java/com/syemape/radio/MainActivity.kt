@@ -198,7 +198,12 @@ private fun AppRoot(onDarkModeChanged: (Boolean) -> Unit) {
             } else {
                 when (tab) {
                     Tab.Mapa -> MapScreen(topInset)
-                    Tab.Radio -> RadioScreen(topInset, bottomInset, onOpenChannelChat = { id, name -> openChannelChat = id to name })
+                    Tab.Radio -> RadioScreen(
+                        topInset,
+                        bottomInset,
+                        onOpenChannelChat = { id, name -> openChannelChat = id to name },
+                        onOpenSettings = { openSub = "settings" },
+                    )
                     Tab.Chats -> ChatsScreen(
                         topInset,
                         onOpenChat = { id, name -> openChat = id to name },

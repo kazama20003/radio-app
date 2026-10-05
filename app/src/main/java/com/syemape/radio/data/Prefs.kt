@@ -32,6 +32,15 @@ object Prefs {
         get() = p?.getBoolean("darkMode", false) ?: false
         set(v) { p?.edit()?.putBoolean("darkMode", v)?.apply() }
 
+    /** Preferencia de sonido de radio; null significa que aún no se sincronizó con ajustes del backend. */
+    var radioSound: Boolean?
+        get() = if (p?.contains("radioSound") == true) p?.getBoolean("radioSound", true) else null
+        set(v) {
+            val editor = p?.edit() ?: return
+            if (v == null) editor.remove("radioSound") else editor.putBoolean("radioSound", v)
+            editor.apply()
+        }
+
     /** Volumen de la radio (0..1) sobre STREAM_VOICE_CALL. Por defecto al máximo. */
     var callVolume: Float
         get() = p?.getFloat("callVolume", 1f) ?: 1f

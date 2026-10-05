@@ -128,7 +128,12 @@ fun AppSettingsScreen(topPadding: Dp, onDarkModeChanged: (Boolean) -> Unit, onBa
     var s by remember { mutableStateOf<AppSetting?>(null) }
     LaunchedEffect(Unit) {
         val remote = runCatching { Backend.api.settings() }.getOrNull() ?: AppSetting()
-        s = remote.copy(darkMode = com.syemape.radio.data.Prefs.darkMode)
+        val savedRadioSound = com.syemape.radio.data.Prefs.radioSound
+        if (savedRadioSound == null) com.syemape.radio.data.Prefs.radioSound = remote.radioSound
+        s = remote.copy(
+            darkMode = com.syemape.radio.data.Prefs.darkMode,
+            radioSound = savedRadioSound ?: remote.radioSound,
+        )
     }
     fun patch(field: String, value: Boolean, apply: (AppSetting) -> AppSetting) {
         s = s?.let(apply)
@@ -141,7 +146,10 @@ fun AppSettingsScreen(topPadding: Dp, onDarkModeChanged: (Boolean) -> Unit, onBa
             else {
                 item { ToggleRow("Ubicación en vivo", "Comparte tu posición en el mapa", cur.liveLocation) { patch("liveLocation", it) { c -> c.copy(liveLocation = it) } } }
                 item { ToggleRow("Mapa de tránsito", "Muestra el tráfico en el mapa", cur.transitMap) { patch("transitMap", it) { c -> c.copy(transitMap = it) } } }
-                item { ToggleRow("Sonido de radio", "Beeps al transmitir/recibir", cur.radioSound) { patch("radioSound", it) { c -> c.copy(radioSound = it) } } }
+                item { ToggleRow("Sonido de radio", "Chirrido de grillo al iniciar PTT", cur.radioSound) {
+                    com.syemape.radio.data.Prefs.radioSound = it
+                    patch("radioSound", it) { c -> c.copy(radioSound = it) }
+                } }
                 item { ToggleRow("Alertas críticas", "Avisos de alertas importantes", cur.criticalAlerts) { patch("criticalAlerts", it) { c -> c.copy(criticalAlerts = it) } } }
                 item { ToggleRow("Modo oscuro", "Tema oscuro de la app", cur.darkMode) {
                     com.syemape.radio.data.Prefs.darkMode = it
