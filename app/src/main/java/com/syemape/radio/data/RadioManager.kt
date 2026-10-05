@@ -76,6 +76,10 @@ object RadioManager {
     private var producer: Producer? = null
     private val consumers = ConcurrentHashMap<String, Consumer>()
     var channelId: String? = null; private set
+    @Volatile private var remoteProducerId: String? = null
+    @Volatile private var consumingProducerId: String? = null
+    @Volatile private var reservationsSupported: Boolean? = null
+    @Volatile private var openChatChannelId: String? = null
     private var appRef: Application? = null
     private var sysAudio: AudioManager? = null
 
@@ -148,11 +152,29 @@ object RadioManager {
         })
         socket.on("ms:newProducer", Emitter.Listener { args ->
             val o = args.firstOrNull() as? JSONObject ?: return@Listener
+            // El mismo socket también entra temporalmente a salas desde el chat del canal.
+            // Nunca consumas audio que no pertenezca al canal sintonizado.
+            val eventChannel = o.optString("channelId")
+            if (eventChannel.isNotBlank() && eventChannel != channelId) return@Listener
+            if (eventChannel.isBlank() && openChatChannelId != null && openChatChannelId != channelId) return@Listener
             val producerId = o.optString("producerId", "")
             val label = speakerAliasFrom(o)
-            if (producerId.isNotEmpty()) worker.execute { consume(producerId, label) }
+            if (producerId.isNotEmpty()) {
+                showRemoteSpeaker(producerId, label)
+                worker.execute { consume(producerId, label) }
+            }
         })
-        socket.on("ms:producerClosed", Emitter.Listener { worker.execute { closeConsumers() } })
+        socket.on("ms:producerClosed", Emitter.Listener { args ->
+            val o = args.firstOrNull() as? JSONObject ?: return@Listener
+            val producerId = o.optString("producerId")
+            val eventChannel = o.optString("channelId")
+            val channelMatches = eventChannel == channelId ||
+                (eventChannel.isBlank() && (openChatChannelId == null || openChatChannelId == channelId))
+            if (channelMatches && remoteProducerId != null && (producerId.isBlank() || producerId == remoteProducerId)) {
+                remoteProducerId = null
+                worker.execute { closeConsumers() }
+            }
+        })
         // Última nota de voz grabada en el canal (para el botón de "escuchar última nota").
         socket.on("ptt:ended", Emitter.Listener { args ->
             val o = args.firstOrNull() as? JSONObject ?: return@Listener
@@ -230,6 +252,13 @@ object RadioManager {
         // "En vivo" hablar funcione y se grabe. Lo pone true el armado de WebRTC/watchdog.
         refreshLastVoiceNote(id)
         RadioService.start(app, channelName)
+        // En el primer arranque no hay canal guardado y el setup inicial ocurre antes
+        // de cargar la lista REST. Arranca los transports en cuanto ya conocemos el id.
+        worker.execute {
+            runCatching { initWebrtc(app) }
+            runCatching { setupMediasoup() }
+            ui.launch { connected = isChannelReady() }
+        }
     }
 
     /** Lanza una sola vez: watchdog de conexión/audio, loop de nivel y armado de WebRTC. */
@@ -324,6 +353,9 @@ object RadioManager {
             connectedUsers = me?.let { listOf(it) } ?: emptyList()
             members = if (me != null) 1 else 0
         }
+        val wasTalking = talking
+        remoteProducerId = null
+        consumingProducerId = null
         talking = false; remoteSpeaking = false; speakerLabel = null; txFailed = false
         lastVoiceNote = null // la nota es por-canal; se recarga la del canal nuevo
         RadioService.update(appRef, channelName)
@@ -338,10 +370,15 @@ object RadioManager {
         worker.execute {
             closeConsumers()
             runCatching { producer?.close() }; producer = null
+            if (wasTalking) runCatching { socket.emit("ms:closeProducer") }
             val cur = ack("ms:getProducer", JSONObject().put("channelId", id)) as? JSONObject
             val curProducer = cur?.optString("producerId")?.takeIf { it.isNotEmpty() }
             if (curProducer != null) consume(curProducer, cur?.let { speakerAliasFrom(it) } ?: "Alguien del canal")
         }
+    }
+
+    fun setOpenChatChannel(id: String?) {
+        openChatChannelId = id
     }
 
     @Volatile private var setupDone = false
@@ -411,25 +448,58 @@ object RadioManager {
         if (setupDone) ui.launch { connected = isChannelReady() }
 
         // consumir al hablante actual si hay
-        val cur = ack("ms:getProducer", JSONObject().put("channelId", cid)) as? JSONObject
-        val curProducer = cur?.optString("producerId")?.takeIf { it.isNotEmpty() }
-        if (curProducer != null) consume(curProducer, cur?.let { speakerAliasFrom(it) } ?: "Alguien del canal")
+        val current = ack("ms:getProducer", JSONObject().put("channelId", cid)) as? JSONObject
+        val curProducer = current?.optString("producerId")?.takeIf { it.isNotEmpty() }
+        if (curProducer != null) {
+            val label = speakerAliasFrom(current ?: JSONObject())
+            showRemoteSpeaker(curProducer, label)
+            consume(curProducer, label)
+        }
+    }
+
+    /** Publica de inmediato el estado del hablante, sin esperar a crear el consumer. */
+    private fun showRemoteSpeaker(producerId: String, label: String) {
+        remoteProducerId = producerId
+        ui.launch {
+            remoteSpeaking = true
+            speakerLabel = label
+            RadioService.refresh(appRef)
+        }
+    }
+
+    private fun clearRemoteSpeaker(producerId: String) {
+        if (remoteProducerId != producerId) return
+        remoteProducerId = null
+        ui.launch {
+            if (remoteProducerId == null) {
+                remoteSpeaking = false
+                speakerLabel = null
+                RadioService.refresh(appRef)
+            }
+        }
     }
 
     /** Extrae el alias del hablante del payload (requiere que el backend incluya `user`). */
     private fun speakerAliasFrom(o: JSONObject): String {
         val u = o.optJSONObject("user") ?: return "Alguien del canal"
-        val nick = u.optString("nickname").takeIf { it.isNotBlank() }
-        val name = u.optString("name").takeIf { it.isNotBlank() }
+        val nick = u.optString("nickname").takeIf { it.isNotBlank() && it != "null" }
+        val name = u.optString("name").takeIf { it.isNotBlank() && it != "null" }
         return nick ?: name ?: "Alguien del canal"
     }
 
     private fun consume(producerId: String, speaker: String) {
+        if (consumingProducerId == producerId) return
+        showRemoteSpeaker(producerId, speaker)
+        consumingProducerId = producerId
         try {
-            val recv = recvTransport ?: return
-            val dev = device ?: return
+            val recv = recvTransport ?: run { consumingProducerId = null; return }
+            val dev = device ?: run { consumingProducerId = null; return }
             val info = ack("ms:consume", JSONObject().put("producerId", producerId).put("rtpCapabilities", JSONObject(dev.rtpCapabilities))) as? JSONObject
-            if (info == null || info.has("error")) return
+            if (info == null || info.has("error")) {
+                consumingProducerId = null
+                clearRemoteSpeaker(producerId)
+                return
+            }
             val consumer = recv.consume(
                 object : Consumer.Listener {
                     override fun onTransportClose(consumer: Consumer) {}
@@ -448,6 +518,8 @@ object RadioManager {
         } catch (t: Throwable) {
             // No tumbar la app si falla crear/arrancar el consumer (p.ej. al entrar
             // varios a la vez): la radio sigue viva y se reintenta en el próximo evento.
+            clearRemoteSpeaker(producerId)
+            if (consumingProducerId == producerId) consumingProducerId = null
         }
     }
 
@@ -456,10 +528,12 @@ object RadioManager {
         // un consumer que se está cerrando. Todo serializado en el worker.
         val snapshot = consumers.values.toList()
         consumers.clear()
+        consumingProducerId = null
+        remoteProducerId = null
         snapshot.forEach { runCatching { it.close() } }
         consuming = false
         releaseAudioSession() // dejé de recibir: libera el audio si tampoco estoy hablando
-        ui.launch { remoteSpeaking = false; speakerLabel = null }
+        ui.launch { remoteSpeaking = false; speakerLabel = null; RadioService.refresh(appRef) }
     }
 
     /** Pitido corto tipo walkie-talkie (inicio/fin de transmisión). */
@@ -492,7 +566,19 @@ object RadioManager {
     }
 
     fun startTalking() {
-        if (remoteSpeaking || talking) return // ya hablando o alguien más habla: no re-entrar
+        if (talking) return
+        if (remoteSpeaking || remoteProducerId != null) {
+            val who = speakerLabel ?: "Alguien"
+            appRef?.let { android.widget.Toast.makeText(it, "$who está hablando", android.widget.Toast.LENGTH_SHORT).show() }
+            return
+        }
+        val app = appRef
+        if (app == null || !hasMicPermission(app)) {
+            txFailed = true
+            app?.let { android.widget.Toast.makeText(it, "Activa el permiso de micrófono para hablar", android.widget.Toast.LENGTH_SHORT).show() }
+            RadioService.refresh(app)
+            return
+        }
         // NO transmitir "en falso": si el canal no está realmente listo (socket + audio
         // armado), no sonamos beep ni marcamos transmitiendo —si no, se perdería la voz
         // (el síntoma "decía conectado pero no se guardó"). Forzamos reconexión/rearme;
@@ -508,11 +594,71 @@ object RadioManager {
         RadioService.refresh(appRef) // notificación → "Cortar"
         worker.execute {
             fun fail() {
-                ui.launch { talking = false; txFailed = true }
+                channelId?.let { socket.emit("ms:releaseReservation", JSONObject().put("channelId", it)) }
                 runCatching { audioManager?.enabled = false }
-                runCatching { RadioService.refresh(appRef) }
+                ui.launch {
+                    talking = false
+                    txFailed = true
+                    releaseAudioSession()
+                    RadioService.refresh(appRef)
+                }
             }
             try {
+                val cid = channelId ?: return@execute fail()
+                var reservation: JSONObject? = null
+                if (reservationsSupported != false) {
+                    reservation = ack(
+                        "ms:reserve",
+                        JSONObject().put("channelId", cid),
+                        if (reservationsSupported == true) 4000 else 800,
+                    ) as? JSONObject
+                    if (reservation != null) reservationsSupported = true
+                }
+                if (reservation == null) {
+                    // Compatibilidad con un backend todavía no actualizado: comprueba
+                    // primero si ya hay alguien hablando antes de invocar mediasoup.
+                    val current = ack("ms:getProducer", JSONObject().put("channelId", cid), 1200) as? JSONObject
+                    if (current == null) return@execute fail()
+                    if (reservationsSupported == null) reservationsSupported = false
+                    val activeId = current.optString("producerId").takeIf { it.isNotBlank() }
+                    if (activeId != null) {
+                        val label = speakerAliasFrom(current)
+                        showRemoteSpeaker(activeId, label)
+                        ui.launch {
+                            talking = false
+                            remoteSpeaking = true
+                            speakerLabel = label
+                            RadioService.refresh(appRef)
+                            appRef?.let {
+                                android.widget.Toast.makeText(it, "$label está hablando", android.widget.Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                        consume(activeId, label)
+                        return@execute
+                    }
+                    reservation = JSONObject().put("ok", true) // ruta compatible con backend anterior
+                }
+                if (reservation?.optBoolean("ok") != true) {
+                    val producerId = reservation?.optString("producerId")?.takeIf { it.isNotBlank() }
+                    val label = reservation?.let { speakerAliasFrom(it) } ?: "Alguien del canal"
+                    if (producerId != null) showRemoteSpeaker(producerId, label)
+                    else remoteProducerId = "reserved:$cid"
+                    ui.launch {
+                        talking = false
+                        remoteSpeaking = true
+                        speakerLabel = label
+                        RadioService.refresh(appRef)
+                        appRef?.let {
+                            android.widget.Toast.makeText(it, "$label está hablando", android.widget.Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                    if (producerId != null) consume(producerId, label)
+                    return@execute
+                }
+                if (!talking) {
+                    socket.emit("ms:releaseReservation", JSONObject().put("channelId", cid))
+                    return@execute
+                }
                 acquireAudioSession() // foco + modo llamada + ruta (en el worker)
                 if (!talking) { // el usuario soltó enseguida
                     runCatching { audioManager?.enabled = false }
@@ -587,7 +733,6 @@ object RadioManager {
     // (STREAM_VOICE_CALL + altavoz + volumen de la radio) para que suenen igual.
     private var notePlayer: android.media.MediaPlayer? = null
     private var notePlayingId: String? = null
-    @Volatile private var noteRoutedByUs = false
 
     private fun audioMgr(): AudioManager? =
         sysAudio ?: (appRef?.getSystemService(Context.AUDIO_SERVICE) as? AudioManager)
@@ -627,12 +772,11 @@ object RadioManager {
         stopVoiceNote { } // corta cualquier otra nota en curso
         val am = audioMgr()
         runCatching {
-            // Enruta como la radio (altavoz + modo comunicación). Si la radio ya
-            // tiene su sesión activa, NO la tocamos (ella manda).
-            if (am != null && !audioSessionActive) {
-                noteRoutedByUs = true
-                am.mode = AudioManager.MODE_IN_COMMUNICATION
-                am.isSpeakerphoneOn = speakerOn
+            if (am != null) {
+                // Refresca la preferencia según el dispositivo conectado y toma la
+                // misma ruta de comunicación Bluetooth/cable/altavoz que usa la radio.
+                autoSelectOutput()
+                acquireAudioSession()
             }
             applyStreamVolume() // sube STREAM_VOICE_CALL al volumen de la radio
             val mp = android.media.MediaPlayer()
@@ -651,21 +795,14 @@ object RadioManager {
         }.onFailure { stopVoiceNote(onState) }
     }
 
-    /** Detiene la nota de voz y devuelve el audio a normal si lo enrutamos nosotros. */
+    /** Detiene la nota de voz y libera la sesión cuando no hay otra voz de radio activa. */
     fun stopVoiceNote(onState: (String?) -> Unit) {
         runCatching { notePlayer?.stop() }
         runCatching { notePlayer?.release() }
         notePlayer = null
         notePlayingId = null
         ui.launch { onState(null) }
-        if (noteRoutedByUs && !audioSessionActive) {
-            noteRoutedByUs = false
-            val am = audioMgr()
-            runCatching {
-                am?.isSpeakerphoneOn = false
-                if (am?.mode == AudioManager.MODE_IN_COMMUNICATION) am.mode = AudioManager.MODE_NORMAL
-            }
-        }
+        releaseAudioSession()
     }
 
     @Volatile private var levelPolling = false
@@ -891,7 +1028,7 @@ object RadioManager {
 
     /** Libera el audio del sistema cuando ya no hay voz (ni hablo ni recibo). */
     private fun releaseAudioSession() {
-        if (talking || consuming) return // sigue habiendo voz
+        if (talking || consuming || notePlayer != null) return // sigue habiendo voz
         if (!audioSessionActive) return
         audioSessionActive = false
         abandonAudioFocus() // soltamos el foco: otras apps vuelven a sonar
@@ -929,14 +1066,15 @@ object RadioManager {
     }
 
     fun stop() {
+        val radioSocket = socket
         worker.execute {
             runCatching { producer?.close() }; producer = null
             closeConsumers()
             runCatching { sendTransport?.close() }; sendTransport = null
             runCatching { recvTransport?.close() }; recvTransport = null
             runCatching { device?.dispose() }; device = null
-            channelId?.let { socket.emit("channel:leave", it) }
-            socket.off("ms:newProducer"); socket.off("ms:producerClosed"); socket.off("connect")
+            channelId?.let { radioSocket.emit("channel:leave", it) }
+            radioSocket.off("ms:newProducer"); radioSocket.off("ms:producerClosed"); radioSocket.off("connect")
             abandonAudioFocus()
             runCatching {
                 audioCallback?.let { sysAudio?.unregisterAudioDeviceCallback(it) }; audioCallback = null

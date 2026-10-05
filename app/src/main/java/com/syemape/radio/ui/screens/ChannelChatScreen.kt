@@ -96,8 +96,6 @@ private fun humanSize(bytes: Long?): String {
     return String.format("%.1f MB", mb)
 }
 
-private const val MAX_UPLOAD_BYTES = 100L * 1024 * 1024 // 100 MB (igual que el backend)
-
 @Composable
 fun ChannelChatScreen(channelId: String, title: String, topPadding: Dp, bottomPadding: Dp, onBack: () -> Unit) {
     val meId = SessionManager.user?.id
@@ -126,17 +124,22 @@ fun ChannelChatScreen(channelId: String, title: String, topPadding: Dp, bottomPa
     // Sube un adjunto elegido y lo publica en el canal.
     fun sendMedia(uri: Uri) {
         val picked = runCatching { MediaUploader.query(context, uri) }.getOrNull() ?: return
-        if (picked.size in 1..Long.MAX_VALUE && picked.size > MAX_UPLOAD_BYTES) {
+        if (picked.size > MediaUploader.MAX_UPLOAD_BYTES) {
             toast("Archivo muy grande (máx 100 MB)")
             return
         }
         scope.launch {
             uploading = true
-            val res = withContext(Dispatchers.IO) {
-                runCatching { MediaUploader.upload(context, picked) }.getOrNull()
+            val outcome = withContext(Dispatchers.IO) {
+                runCatching { MediaUploader.upload(context, picked) }
             }
             uploading = false
-            if (res == null) { toast("No se pudo subir el archivo"); return@launch }
+            val res = outcome.getOrNull()
+            if (res == null) {
+                val tooLarge = outcome.exceptionOrNull() is com.syemape.radio.data.MediaUploadTooLargeException
+                toast(if (tooLarge) "Archivo muy grande (máx 100 MB)" else "No se pudo subir el archivo")
+                return@launch
+            }
             val kind = MediaUploader.kindOf(picked.mime)
             Realtime.socket("/radio").emit(
                 "channel:media",
@@ -178,6 +181,7 @@ fun ChannelChatScreen(channelId: String, title: String, topPadding: Dp, bottomPa
 
     DisposableEffect(channelId) {
         val socket = Realtime.socket("/radio")
+        com.syemape.radio.data.RadioManager.setOpenChatChannel(channelId)
         // Asegura estar en la sala del canal para recibir eventos en vivo.
         if (!socket.connected()) socket.connect()
         socket.emit("channel:join", channelId)
@@ -192,7 +196,18 @@ fun ChannelChatScreen(channelId: String, title: String, topPadding: Dp, bottomPa
         }
         socket.on("channel:post", addFromEvent) // texto / imagen / video / archivo
         socket.on("ptt:ended", addFromEvent)    // nota de voz grabada
-        onDispose { socket.off("channel:post", addFromEvent); socket.off("ptt:ended", addFromEvent) }
+        onDispose {
+            socket.off("channel:post", addFromEvent)
+            socket.off("ptt:ended", addFromEvent)
+            com.syemape.radio.data.RadioManager.setOpenChatChannel(null)
+            // /radio usa un solo socket y una sola sala activa. Restablece la sala que
+            // sigue mostrando el sintonizador al cerrar el chat de otro canal.
+            val tunedChannel = com.syemape.radio.data.RadioManager.channelId
+            if (tunedChannel != channelId) {
+                socket.emit("channel:leave", channelId)
+                tunedChannel?.let { socket.emit("channel:join", it) }
+            }
+        }
     }
 
     Column(Modifier.fillMaxSize().background(MapeColors.Bg)) {
@@ -283,7 +298,7 @@ fun ChannelChatScreen(channelId: String, title: String, topPadding: Dp, bottomPa
             ) {
                 if (draft.isEmpty()) Text("Mensaje al canal…", color = MapeColors.TextFaint, fontFamily = Outfit, fontSize = 15.sp)
                 BasicTextField(
-                    value = draft, onValueChange = { draft = it },
+                    value = draft, onValueChange = { draft = it.take(2000) },
                     textStyle = TextStyle(fontFamily = Outfit, fontSize = 15.sp, color = MapeColors.Ink),
                     cursorBrush = SolidColor(MapeColors.Ink),
                     modifier = Modifier.fillMaxWidth(),
@@ -293,8 +308,25 @@ fun ChannelChatScreen(channelId: String, title: String, topPadding: Dp, bottomPa
                 Modifier.size(48.dp).clip(CircleShape).background(MapeColors.Ink).pressScale(enabled = draft.isNotBlank()) {
                     val text = draft.trim()
                     if (text.isNotEmpty()) {
-                        draft = ""
-                        Realtime.socket("/radio").emit("channel:text", JSONObject().put("channelId", channelId).put("text", text))
+                        val chatSocket = Realtime.socket("/radio")
+                        if (!chatSocket.connected()) {
+                            toast("Sin conexión. El mensaje sigue en el borrador.")
+                        } else {
+                            draft = ""
+                            chatSocket.emit(
+                            "channel:text",
+                            JSONObject().put("channelId", channelId).put("text", text),
+                            io.socket.client.Ack { args ->
+                                val ack = args.firstOrNull() as? JSONObject
+                                if (ack?.optBoolean("ok") != true) {
+                                    scope.launch(Dispatchers.Main) {
+                                        if (draft.isEmpty()) draft = text
+                                        toast("No se pudo enviar el mensaje. Inténtalo de nuevo.")
+                                    }
+                                }
+                            },
+                            )
+                        }
                     }
                 },
                 contentAlignment = Alignment.Center,

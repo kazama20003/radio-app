@@ -2,7 +2,6 @@ package com.syemape.radio.ui.screens
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -69,7 +68,7 @@ fun LoginScreen(
     var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var showPass by remember { mutableStateOf(false) }
-    var remember2 by remember { mutableStateOf(true) }
+    var validationError by remember { mutableStateOf<String?>(null) }
 
     Column(
         Modifier
@@ -102,16 +101,13 @@ fun LoginScreen(
                 Modifier.padding(horizontal = 28.dp).padding(top = topPadding + 20.dp, bottom = 32.dp),
                 verticalArrangement = Arrangement.spacedBy(24.dp),
             ) {
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
-                    Box(Modifier.size(44.dp).pressScale { }, contentAlignment = Alignment.CenterStart) {
-                        Icon(MapeIcons.ArrowLeft, null, tint = MapeColors.White, modifier = Modifier.size(26.dp))
-                    }
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Start) {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Box(Modifier.size(32.dp).clip(RoundedCornerShape(10.dp)).background(MapeColors.White), contentAlignment = Alignment.Center) {
+                        Box(Modifier.size(44.dp).clip(RoundedCornerShape(12.dp)).background(MapeColors.White), contentAlignment = Alignment.Center) {
                             androidx.compose.foundation.Image(
                                 painter = androidx.compose.ui.res.painterResource(R.drawable.mape_logo),
                                 contentDescription = "Mape",
-                                modifier = Modifier.size(26.dp),
+                                modifier = Modifier.size(40.dp),
                             )
                         }
                         Text("Mape", color = MapeColors.White, fontFamily = Outfit, fontWeight = FontWeight.Bold, fontSize = 18.sp, letterSpacing = (-0.4).sp)
@@ -150,14 +146,14 @@ fun LoginScreen(
                 Modifier.fillMaxWidth().clip(RoundedCornerShape(27.dp)).background(MapeColors.White).padding(5.dp),
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                SegmentButton("Administrador", MapeIcons.User, admin, Modifier.weight(1f)) { admin = true; email = "" }
-                SegmentButton("Supervisor", MapeIcons.UserPlus, !admin, Modifier.weight(1f)) { admin = false; email = "" }
+                SegmentButton("Administrador", MapeIcons.User, admin, Modifier.weight(1f)) { admin = true; email = ""; validationError = null }
+                SegmentButton("Supervisor", MapeIcons.UserPlus, !admin, Modifier.weight(1f)) { admin = false; email = ""; validationError = null }
             }
 
             FieldLabel(if (admin) "Correo" else "DNI")
             InputField(
                 value = email,
-                onValue = { email = it },
+                onValue = { email = it; validationError = null },
                 placeholder = if (admin) "correo@mape.app" else "Ingresa tu DNI",
                 leading = MapeIcons.User,
                 keyboardType = if (admin) KeyboardType.Email else KeyboardType.Number,
@@ -166,35 +162,13 @@ fun LoginScreen(
             FieldLabel("Contraseña")
             InputField(
                 value = password,
-                onValue = { password = it },
+                onValue = { password = it; validationError = null },
                 placeholder = "",
                 leading = MapeIcons.Lock,
                 password = !showPass,
                 trailing = MapeIcons.Eye,
                 onTrailing = { showPass = !showPass },
             )
-
-            Row(
-                Modifier.fillMaxWidth().padding(horizontal = 6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween,
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Box(
-                        Modifier
-                            .size(18.dp)
-                            .clip(RoundedCornerShape(5.dp))
-                            .background(if (remember2) MapeColors.Ink else Color.Transparent)
-                            .border(1.5.dp, if (remember2) MapeColors.Ink else Color(0xFFB5B5B5), RoundedCornerShape(5.dp))
-                            .pressScale { remember2 = !remember2 },
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        if (remember2) Icon(MapeIcons.DoubleCheck, null, tint = MapeColors.White, modifier = Modifier.size(12.dp))
-                    }
-                    Text("Recordarme", color = Color(0xFF4A4A4A), fontFamily = Outfit, fontSize = 13.sp)
-                }
-                Text("¿Olvidaste tu contraseña?", color = MapeColors.Ink, fontFamily = Outfit, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
-            }
 
             Spacer(Modifier.height(10.dp))
             Row(
@@ -203,7 +177,17 @@ fun LoginScreen(
                     .height(58.dp)
                     .clip(RoundedCornerShape(29.dp))
                     .background(if (loading) MapeColors.Ink.copy(alpha = 0.6f) else MapeColors.Ink)
-                    .pressScale(enabled = !loading) { onLogin(email, password) },
+                    .pressScale(enabled = !loading) {
+                        val identifier = email.trim()
+                        validationError = when {
+                            identifier.isBlank() -> if (admin) "Ingresa tu correo" else "Ingresa tu DNI"
+                            admin && !android.util.Patterns.EMAIL_ADDRESS.matcher(identifier).matches() -> "Ingresa un correo válido"
+                            !admin && !identifier.matches(Regex("\\d{8}")) -> "El DNI debe tener 8 dígitos"
+                            password.isBlank() -> "Ingresa tu contraseña"
+                            else -> null
+                        }
+                        if (validationError == null) onLogin(identifier, password)
+                    },
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.Center,
             ) {
@@ -219,9 +203,10 @@ fun LoginScreen(
                     Icon(MapeIcons.ArrowRight, null, tint = MapeColors.White, modifier = Modifier.size(18.dp))
                 }
             }
-            if (error != null) {
+            val visibleError = validationError ?: error
+            if (visibleError != null) {
                 Text(
-                    error,
+                    visibleError,
                     color = MapeColors.Red,
                     fontFamily = Outfit,
                     fontSize = 13.sp,
@@ -230,21 +215,6 @@ fun LoginScreen(
                 )
             }
 
-            // Divisor
-            Row(
-                Modifier.fillMaxWidth().padding(top = 6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                Box(Modifier.weight(1f).height(1.dp).background(MapeColors.Border))
-                Text("o continúa con", color = MapeColors.TextFaint, fontFamily = Outfit, fontSize = 12.sp)
-                Box(Modifier.weight(1f).height(1.dp).background(MapeColors.Border))
-            }
-
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                OutlineButton("Código QR", MapeIcons.Qr, Modifier.weight(1f))
-                OutlineButton("Huella", MapeIcons.Fingerprint, Modifier.weight(1f))
-            }
         }
 
         // ---- Pie ----
@@ -286,7 +256,6 @@ fun LoginScreen(
         }
     }
 }
-
 @Composable
 private fun FieldLabel(text: String) {
     Text(text, color = Color(0xFF4A4A4A), fontFamily = Outfit, fontWeight = FontWeight.SemiBold, fontSize = 13.sp, modifier = Modifier.padding(start = 6.dp))
@@ -342,18 +311,5 @@ private fun SegmentButton(label: String, icon: ImageVector, active: Boolean, mod
         Icon(icon, null, tint = if (active) MapeColors.White else MapeColors.TextMuted, modifier = Modifier.size(16.dp))
         Spacer(Modifier.width(7.dp))
         Text(label, color = if (active) MapeColors.White else MapeColors.TextMuted, fontFamily = Outfit, fontWeight = FontWeight.SemiBold, fontSize = 13.5.sp)
-    }
-}
-
-@Composable
-private fun OutlineButton(label: String, icon: ImageVector, modifier: Modifier) {
-    Row(
-        modifier.height(54.dp).clip(RoundedCornerShape(27.dp)).background(MapeColors.White).border(1.5.dp, MapeColors.Border, RoundedCornerShape(27.dp)).pressScale { },
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.Center,
-    ) {
-        Icon(icon, null, tint = MapeColors.Ink, modifier = Modifier.size(20.dp))
-        Spacer(Modifier.width(8.dp))
-        Text(label, color = MapeColors.Ink, fontFamily = Outfit, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
     }
 }

@@ -163,14 +163,19 @@ class RadioService : Service() {
                 android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE,
             )
             val talking = com.syemape.radio.data.RadioManager.talking
+            val remoteSpeaking = com.syemape.radio.data.RadioManager.remoteSpeaking
+            val speaker = com.syemape.radio.data.RadioManager.speakerLabel?.takeIf { it.isNotBlank() }
             return NotificationCompat.Builder(context, CHANNEL_ID)
                 .setSmallIcon(com.syemape.radio.R.drawable.ic_stat_radio)
                 .setColor(0xFFE5322D.toInt())
                 .apply { if (logo != null) setLargeIcon(logo) }
                 .setContentTitle(channelText)
                 .setContentText(
-                    if (talking) "🔴 Transmitiendo… toca Cortar para terminar"
-                    else "Radio en vivo · toca Hablar para transmitir",
+                    when {
+                        talking -> "🔴 Transmitiendo… toca Cortar para terminar"
+                        remoteSpeaking -> "🔊 ${speaker ?: "Alguien"} está hablando"
+                        else -> "Radio en vivo · toca Hablar para transmitir"
+                    },
                 )
                 .setOngoing(true)
                 .setSilent(true)
@@ -180,7 +185,11 @@ class RadioService : Service() {
                 .setContentIntent(pi)
                 .addAction(
                     com.syemape.radio.R.drawable.ic_stat_radio,
-                    if (talking) "Cortar" else "Hablar",
+                    when {
+                        talking -> "Cortar"
+                        remoteSpeaking -> "Espera"
+                        else -> "Hablar"
+                    },
                     talkPi,
                 )
                 .addAction(com.syemape.radio.R.drawable.ic_stat_radio, "Desconectar", stopPi)

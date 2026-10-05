@@ -72,8 +72,6 @@ fun RadioScreen(topPadding: Dp, bottomPadding: Dp = 0.dp, onOpenChannelChat: (St
         else micLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
         onDispose { } // la radio sigue viva en 2º plano; se detiene al cerrar sesión
     }
-    var favorite by remember { mutableStateOf(false) }
-
     Column(
         Modifier.fillMaxSize().background(MapeColors.White).padding(top = topPadding + 14.dp, start = 24.dp, end = 24.dp, bottom = bottomPadding + 96.dp),
     ) {
@@ -170,20 +168,12 @@ fun RadioScreen(topPadding: Dp, bottomPadding: Dp = 0.dp, onOpenChannelChat: (St
 
         Spacer(Modifier.height(22.dp))
 
-        // ---- Estrella + compartir + última nota de voz ----
+        // ---- Última nota de voz ----
         val lastNote = RadioManager.lastVoiceNote
         var lastPlaying by remember { mutableStateOf(false) }
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
-            Box(
-                Modifier.size(52.dp).clip(CircleShape).background(if (favorite) MapeColors.RedSoftBg else MapeColors.Bg).pressScale { favorite = !favorite },
-                contentAlignment = Alignment.Center,
-            ) { Icon(if (favorite) MapeIcons.StarFilled else MapeIcons.Star, null, tint = MapeColors.Red, modifier = Modifier.size(22.dp)) }
-            Box(
-                Modifier.size(52.dp).clip(CircleShape).background(MapeColors.Bg).pressScale { },
-                contentAlignment = Alignment.Center,
-            ) { Icon(MapeIcons.Share, null, tint = MapeColors.Ink, modifier = Modifier.size(20.dp)) }
-            // Escuchar la última nota de voz del canal (solo si hay).
-            if (lastNote != null) {
+        if (lastNote != null) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                // Escuchar la última nota de voz del canal (solo si hay).
                 Row(
                     Modifier.height(52.dp).clip(CircleShape).background(if (lastPlaying) MapeColors.Ink else MapeColors.Bg)
                         .pressScale { RadioManager.playLastVoiceNote { id -> lastPlaying = id != null } }

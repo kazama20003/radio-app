@@ -46,7 +46,6 @@ import com.syemape.radio.ui.Avatar
 import com.syemape.radio.ui.FilterRow
 import com.syemape.radio.ui.LiveDot
 import com.syemape.radio.ui.MapeIcons
-import com.syemape.radio.ui.RoundIconButton
 import com.syemape.radio.ui.avatarColor
 import com.syemape.radio.ui.initialsOf
 import com.syemape.radio.ui.pressScale
@@ -170,11 +169,7 @@ fun MapScreen(topPadding: Dp) {
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween,
             ) {
-                RoundIconButton(MapeIcons.Menu, bg = MapeColors.Ink, tint = MapeColors.White)
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    RoundIconButton(MapeIcons.Search, bg = MapeColors.White, tint = MapeColors.Ink)
-                    Avatar(initialsOf(user?.name ?: "?"), MapeColors.Red, size = 46.dp, border = 2.dp, borderColor = MapeColors.White)
-                }
+                Avatar(initialsOf(user?.name ?: "?"), MapeColors.Red, size = 46.dp, border = 2.dp, borderColor = MapeColors.White)
             }
             Column {
                 Row(
@@ -386,6 +381,7 @@ private fun MapPreview(
     onMarkerClick: (String) -> Unit,
     boxModifier: Modifier,
 ) {
+    val cameraScope = rememberCoroutineScope()
     val located = people.filter { it.lastLat != null && it.lastLng != null }
     val firstUnit = units.firstOrNull { it.lat != null && it.lng != null }
     val firstLat = located.firstOrNull()?.lastLat ?: firstUnit?.lat
@@ -407,6 +403,7 @@ private fun MapPreview(
     }
 
     val selected = located.firstOrNull { it.id == selectedId }
+    val myPosition = located.firstOrNull { it.id == meId }
     // Al seleccionar un operador: vuela la cámara a su posición.
     LaunchedEffect(selectedId, selected?.lastLat, selected?.lastLng) {
         if (routePoints.isEmpty() && selected?.lastLat != null && selected.lastLng != null) {
@@ -486,7 +483,19 @@ private fun MapPreview(
             Text("En vivo · ${people.size} en línea", color = MapeColors.White, fontFamily = Outfit, fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
         }
         Box(
-            Modifier.align(Alignment.TopEnd).padding(12.dp).size(44.dp).clip(CircleShape).background(MapeColors.White).pressScale { },
+            Modifier.align(Alignment.TopEnd).padding(12.dp).size(44.dp).clip(CircleShape).background(MapeColors.White)
+                .pressScale(enabled = myPosition != null) {
+                    myPosition?.let { person ->
+                        cameraScope.launch {
+                            camera.animate(
+                                com.google.android.gms.maps.CameraUpdateFactory.newLatLngZoom(
+                                    LatLng(person.lastLat!!, person.lastLng!!), 16f,
+                                ),
+                                500,
+                            )
+                        }
+                    }
+                },
             contentAlignment = Alignment.Center,
         ) { Icon(MapeIcons.Locate, null, tint = MapeColors.Ink, modifier = Modifier.size(20.dp)) }
     }

@@ -117,7 +117,7 @@ object Backend {
             val used = response.request.header("Authorization")?.removePrefix("Bearer ")
             val ok = refreshAccessToken(used)
             if (!ok) {
-                tokens.clear()
+                SessionManager.expireLocalSession()
                 return@Authenticator null
             }
             response.request.newBuilder()

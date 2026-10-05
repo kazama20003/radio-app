@@ -11,12 +11,12 @@ import androidx.compose.ui.text.TextStyle
 private val MapeColorScheme = lightColorScheme(
     primary = MapeColors.Ink,
     onPrimary = MapeColors.White,
-    secondary = MapeColors.Red,
+    secondary = MapeColors.Ink,
     background = MapeColors.Bg,
     onBackground = MapeColors.Ink,
     surface = MapeColors.White,
     onSurface = MapeColors.Ink,
-    error = MapeColors.Red,
+    error = MapeColors.Ink,
 )
 
 /**

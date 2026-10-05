@@ -52,6 +52,17 @@ object SessionManager {
         status = AuthStatus.Unauthenticated
     }
 
+    /** Limpia también el estado visible cuando el Authenticator no puede renovar la sesión. */
+    fun expireLocalSession() {
+        Backend.tokens.clear()
+        runCatching { RadioManager.stop() }
+        runCatching { TrackingManager.stop() }
+        runCatching { AppBadges.reset() }
+        runCatching { Realtime.closeAll() }
+        user = null
+        status = AuthStatus.Unauthenticated
+    }
+
     private fun messageFromHttp(e: HttpException): String {
         val raw = runCatching { e.response()?.errorBody()?.string() }.getOrNull() ?: return defaultFor(e.code())
         return runCatching {

@@ -16,12 +16,15 @@ data class PickedFile(
     val mime: String,
 )
 
+class MediaUploadTooLargeException : IllegalArgumentException("Archivo muy grande (máx 100 MB)")
+
 /**
  * Sube archivos (imágenes, videos, documentos) elegidos por el usuario a
  * `POST /api/media/upload`. Copia el contenido del `Uri` a un archivo temporal
  * del caché (no carga todo en memoria) para soportar videos grandes.
  */
 object MediaUploader {
+    const val MAX_UPLOAD_BYTES = 100L * 1024 * 1024
     /** Lee nombre, tamaño y tipo MIME de un `Uri` de contenido. */
     fun query(context: Context, uri: Uri): PickedFile {
         val cr = context.contentResolver
@@ -54,7 +57,17 @@ object MediaUploader {
         val tmp = File.createTempFile("upload", null, context.cacheDir)
         try {
             context.contentResolver.openInputStream(picked.uri)?.use { input ->
-                tmp.outputStream().use { out -> input.copyTo(out) }
+                tmp.outputStream().buffered().use { out ->
+                    val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                    var total = 0L
+                    while (true) {
+                        val count = input.read(buffer)
+                        if (count < 0) break
+                        total += count
+                        if (total > MAX_UPLOAD_BYTES) throw MediaUploadTooLargeException()
+                        out.write(buffer, 0, count)
+                    }
+                }
             } ?: throw IllegalStateException("No se pudo abrir el archivo")
             val body = tmp.asRequestBody(picked.mime.toMediaTypeOrNull())
             val part = MultipartBody.Part.createFormData("file", picked.name, body)

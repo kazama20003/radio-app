@@ -87,12 +87,12 @@ fun Avatar(
 
 /** Colores de avatar variados (réplica aproximada de las variantes juan/luis/carlos/rosa). */
 private val avatarPalette = listOf(
-    Color(0xFF347B5D), // juan - verde
-    Color(0xFFB86B58), // luis - terracota
-    Color(0xFF3A715A), // carlos - verde oscuro
-    Color(0xFFC08457), // rosa - ocre
-    Color(0xFF4A6FA5), // azul
-    Color(0xFF8A5A9E), // morado
+    Color(0xFF171717),
+    Color(0xFF303030),
+    Color(0xFF494949),
+    Color(0xFF626262),
+    Color(0xFF7B7B7B),
+    Color(0xFF242424),
 )
 
 fun avatarColor(seed: String): Color =

@@ -52,6 +52,7 @@ import kotlinx.coroutines.launch
 
 @Composable
 fun ChatDetailScreen(conversationId: String, title: String, topPadding: Dp, bottomPadding: Dp, onBack: () -> Unit) {
+    val context = androidx.compose.ui.platform.LocalContext.current
     val meId = SessionManager.user?.id
     val scope = rememberCoroutineScope()
     val messages = remember { mutableStateListOf<Message>() }
@@ -163,7 +164,7 @@ fun ChatDetailScreen(conversationId: String, title: String, topPadding: Dp, bott
                 if (draft.isEmpty()) Text("Mensaje…", color = MapeColors.TextFaint, fontFamily = Outfit, fontSize = 15.sp)
                 BasicTextField(
                     value = draft,
-                    onValueChange = { draft = it },
+                    onValueChange = { draft = it.take(2000) },
                     textStyle = TextStyle(fontFamily = Outfit, fontSize = 15.sp, color = MapeColors.Ink),
                     cursorBrush = SolidColor(MapeColors.Ink),
                     modifier = Modifier.fillMaxWidth(),
@@ -177,7 +178,15 @@ fun ChatDetailScreen(conversationId: String, title: String, topPadding: Dp, bott
                         sending = true
                         scope.launch {
                             runCatching { Backend.api.sendMessage(conversationId, SendMessageRequest(type = "TEXT", body = text)) }
-                                .onSuccess { messages.add(it) }
+                                .onSuccess { sent -> if (messages.none { it.id == sent.id }) messages.add(sent) }
+                                .onFailure {
+                                    if (draft.isEmpty()) draft = text
+                                    android.widget.Toast.makeText(
+                                        context,
+                                        "No se pudo enviar el mensaje. Inténtalo de nuevo.",
+                                        android.widget.Toast.LENGTH_SHORT,
+                                    ).show()
+                                }
                             sending = false
                         }
                     }

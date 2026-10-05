@@ -25,7 +25,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -38,15 +37,12 @@ import com.syemape.radio.data.Fmt
 import com.syemape.radio.data.SessionManager
 import com.syemape.radio.ui.Avatar
 import com.syemape.radio.ui.MapeIcons
-import com.syemape.radio.ui.RoundIconButton
 import com.syemape.radio.ui.avatarColor
 import com.syemape.radio.ui.initialsOf
 import com.syemape.radio.ui.pressScale
 import com.syemape.radio.ui.rememberAsync
 import com.syemape.radio.ui.theme.MapeColors
 import com.syemape.radio.ui.theme.Outfit
-
-private val Color8A = Color(0xFF8A8A8A)
 
 private data class ChatDisplay(
     val id: String,
@@ -92,20 +88,9 @@ fun ChatsScreen(
                 horizontalArrangement = Arrangement.SpaceBetween,
             ) {
                 Text("Chats", color = MapeColors.Ink, fontFamily = Outfit, fontWeight = FontWeight.Medium, fontSize = 30.sp)
-                RoundIconButton(MapeIcons.Plus, bg = MapeColors.Ink, tint = MapeColors.White)
             }
         }
-        item {
-            Row(
-                Modifier.fillMaxWidth().padding(top = 10.dp).height(48.dp).clip(CircleShape).background(MapeColors.White).padding(horizontal = 16.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Icon(MapeIcons.Search, null, tint = MapeColors.TextMuted, modifier = Modifier.size(18.dp))
-                Spacer(Modifier.width(10.dp))
-                Text("Buscar chat", color = Color8A, fontFamily = Outfit, fontSize = 14.sp)
-            }
-            Spacer(Modifier.height(10.dp))
-        }
+        item { Spacer(Modifier.height(10.dp)) }
         if (channels.isNotEmpty()) {
             item {
                 Text(
