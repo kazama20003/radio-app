@@ -577,6 +577,7 @@ object RadioManager {
                 info.getJSONObject("rtpParameters").toString(),
             )
             consumers[consumer.id] = consumer
+            applyRemoteTrackVolume(consumer)
             // Selecciona la salida ANTES de abrir el consumer: al reanudarlo primero,
             // el primer fragmento podía salir por el teléfono mientras enlazaba BT.
             consuming = true
@@ -887,9 +888,42 @@ object RadioManager {
         runCatching {
             val stream = AudioManager.STREAM_VOICE_CALL
             val max = am.getStreamMaxVolume(stream)
-            val idx = Math.round(callVolume * max).coerceIn(0, max)
+            // En Bluetooth el volumen del stream de llamada puede no obedecer al
+            // deslizador (depende del perfil SCO/BLE y del fabricante). En ese
+            // caso dejamos el stream al máximo y controlamos la pista WebRTC.
+            val idx = if (isBluetoothCommunicationRoute()) max
+                else Math.round(callVolume * max).coerceIn(0, max)
             am.setStreamVolume(stream, idx, 0)
         }
+        val trackVolume = if (isBluetoothCommunicationRoute()) callVolume.toDouble() else 1.0
+        worker.execute { consumers.values.forEach { applyRemoteTrackVolume(it, trackVolume) } }
+    }
+
+    private fun applyRemoteTrackVolume(consumer: Consumer, volume: Double = currentRemoteTrackVolume()) {
+        if (consumer.kind != "audio") return
+        runCatching { (consumer.track as? org.webrtc.AudioTrack)?.setVolume(volume.coerceIn(0.0, 1.0)) }
+            .onFailure { android.util.Log.w(TAG, "No se pudo aplicar volumen a pista remota", it) }
+    }
+
+    private fun currentRemoteTrackVolume(): Double =
+        if (isBluetoothCommunicationRoute()) callVolume.toDouble() else 1.0
+
+    private fun isBluetoothCommunicationRoute(): Boolean {
+        val am = sysAudio ?: return false
+        return runCatching {
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+                am.communicationDevice?.type?.let { it in intArrayOf(
+                    android.media.AudioDeviceInfo.TYPE_BLUETOOTH_SCO,
+                    android.media.AudioDeviceInfo.TYPE_BLE_HEADSET,
+                    android.media.AudioDeviceInfo.TYPE_BLE_SPEAKER,
+                ) } == true
+            } else {
+                am.getDevices(AudioManager.GET_DEVICES_OUTPUTS).any {
+                    it.type == android.media.AudioDeviceInfo.TYPE_BLUETOOTH_SCO ||
+                        it.type == android.media.AudioDeviceInfo.TYPE_BLUETOOTH_A2DP
+                }
+            }
+        }.getOrDefault(false)
     }
 
     // ── Reproducción de notas de voz del chat ────────────────────
@@ -1319,8 +1353,11 @@ object RadioManager {
             if (am.mode != AudioManager.MODE_IN_COMMUNICATION) am.mode = AudioManager.MODE_IN_COMMUNICATION
             val stream = AudioManager.STREAM_VOICE_CALL
             val max = am.getStreamMaxVolume(stream)
-            val target = Math.round(callVolume * max).coerceIn(0, max)
+            val target = if (isBluetoothCommunicationRoute()) max
+                else Math.round(callVolume * max).coerceIn(0, max)
             if (am.getStreamVolume(stream) != target) am.setStreamVolume(stream, target, 0)
+            val trackVolume = currentRemoteTrackVolume()
+            consumers.values.forEach { applyRemoteTrackVolume(it, trackVolume) }
         }
     }
 
