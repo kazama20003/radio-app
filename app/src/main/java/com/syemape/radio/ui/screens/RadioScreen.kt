@@ -193,7 +193,7 @@ fun RadioScreen(
                 Text("${(RadioManager.callVolume * 100).toInt()}%", color = RadioColors.TextMuted, fontFamily = Outfit, fontSize = 11.sp)
             }
 
-            Box(Modifier.fillMaxWidth().weight(1f).padding(top = 3.dp, bottom = 3.dp), contentAlignment = Alignment.Center) {
+            Box(Modifier.fillMaxWidth().weight(1f).padding(top = 3.dp, bottom = 12.dp), contentAlignment = Alignment.BottomCenter) {
                 HoldTalkButton(compact = true)
             }
         }
