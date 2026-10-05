@@ -222,12 +222,20 @@ private fun RadioHero(topPadding: Dp, onOpenSettings: () -> Unit, compact: Boole
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(9.dp),
         ) {
-            Image(
-                painter = painterResource(com.syemape.radio.R.drawable.radio_logo),
-                contentDescription = "Logo MAPE",
-                modifier = Modifier.size(if (compact) 54.dp else 64.dp),
-                contentScale = ContentScale.Fit,
-            )
+            Box(
+                Modifier.size(if (compact) 64.dp else 76.dp)
+                    .clip(CircleShape)
+                    .background(Color.White)
+                    .padding(4.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Image(
+                    painter = painterResource(com.syemape.radio.R.drawable.radio_logo),
+                    contentDescription = "Logo MAPE",
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Fit,
+                )
+            }
             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Text("S & E MAPE E.I.R.L.", color = Color.White, fontFamily = Outfit, fontWeight = FontWeight.Bold, fontSize = 16.sp, maxLines = 1)
                 Text("Supervisión y Emergencias", color = Color.White.copy(alpha = 0.94f), fontFamily = Outfit, fontSize = 11.sp, maxLines = 1)
