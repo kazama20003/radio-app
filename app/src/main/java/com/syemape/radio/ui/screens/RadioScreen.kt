@@ -40,6 +40,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Brush
@@ -172,18 +173,18 @@ fun RadioScreen(
                 }
             }
 
-            Box(Modifier.fillMaxWidth().padding(vertical = 2.dp), contentAlignment = Alignment.Center) {
-                HoldTalkButton(compact = true)
-            }
-
             Row(
-                Modifier.fillMaxWidth().height(25.dp).padding(horizontal = 8.dp),
+                Modifier.fillMaxWidth().height(22.dp).padding(horizontal = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 Icon(MapeIcons.Speaker, null, tint = MapeColors.TextMuted, modifier = Modifier.size(18.dp))
                 VolumeSlider(Modifier.weight(1f))
                 Text("${(RadioManager.callVolume * 100).toInt()}%", color = MapeColors.TextMuted, fontFamily = Outfit, fontSize = 11.sp)
+            }
+
+            Box(Modifier.fillMaxWidth().weight(1f, fill = false).padding(top = 1.dp, bottom = 3.dp), contentAlignment = Alignment.Center) {
+                HoldTalkButton(compact = true)
             }
         }
     }
@@ -205,13 +206,28 @@ private fun RadioHero(topPadding: Dp, onOpenSettings: () -> Unit, compact: Boole
                 Brush.horizontalGradient(listOf(Color.Black.copy(alpha = 0.82f), Color.Black.copy(alpha = 0.18f))),
             ),
         )
-        Column(
-            Modifier.align(Alignment.BottomStart).padding(start = 20.dp, end = 72.dp, bottom = if (compact) 10.dp else 18.dp),
-            verticalArrangement = Arrangement.spacedBy(3.dp),
+        Row(
+            Modifier.align(Alignment.BottomStart).padding(start = 14.dp, end = 72.dp, bottom = if (compact) 9.dp else 18.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(9.dp),
         ) {
-            Text("S & E MAPE E.I.R.L.", color = Color.White, fontFamily = Outfit, fontWeight = FontWeight.Bold, fontSize = 18.sp)
-            Text("Supervisión y Emergencias", color = Color.White.copy(alpha = 0.94f), fontFamily = Outfit, fontSize = 12.sp)
-            Text("Resguardo · Seguridad · Transporte", color = Color.White.copy(alpha = 0.84f), fontFamily = Outfit, fontSize = 10.sp)
+            Box(
+                Modifier.size(if (compact) 42.dp else 54.dp).clip(CircleShape).background(Color.White)
+                    .border(1.dp, Color.White.copy(alpha = 0.8f), CircleShape),
+                contentAlignment = Alignment.Center,
+            ) {
+                Image(
+                    painter = painterResource(com.syemape.radio.R.drawable.mape_logo),
+                    contentDescription = "Logo MAPE",
+                    modifier = Modifier.fillMaxSize().clip(CircleShape).graphicsLayer { scaleX = 2.35f; scaleY = 2.35f },
+                    contentScale = ContentScale.Crop,
+                )
+            }
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text("S & E MAPE E.I.R.L.", color = Color.White, fontFamily = Outfit, fontWeight = FontWeight.Bold, fontSize = 16.sp, maxLines = 1)
+                Text("Supervisión y Emergencias", color = Color.White.copy(alpha = 0.94f), fontFamily = Outfit, fontSize = 11.sp, maxLines = 1)
+                Text("Resguardo · Seguridad · Transporte", color = Color.White.copy(alpha = 0.84f), fontFamily = Outfit, fontSize = 9.sp, maxLines = 1)
+            }
         }
         Box(
             Modifier.align(Alignment.TopEnd).padding(top = topPadding + 8.dp, end = 18.dp)
