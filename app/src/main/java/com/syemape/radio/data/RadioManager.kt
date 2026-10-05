@@ -51,6 +51,7 @@ object RadioManager {
     var talking by mutableStateOf(false); private set        // yo estoy transmitiendo
     var remoteSpeaking by mutableStateOf(false); private set // alguien habla
     var speakerLabel by mutableStateOf<String?>(null); private set // alias de quien habla
+    var lastSpeakerLabel by mutableStateOf<String?>(null); private set // último hablante confirmado por audio
     var speakerOn by mutableStateOf(true); private set
     var callVolume by mutableStateOf(1f); private set        // volumen de la radio 0..1
     var txFailed by mutableStateOf(false); private set
@@ -179,6 +180,15 @@ object RadioManager {
         socket.on("ptt:ended", Emitter.Listener { args ->
             val o = args.firstOrNull() as? JSONObject ?: return@Listener
             if (o.optString("channelId") != channelId) return@Listener
+            val sender = o.optJSONObject("transmission")?.optJSONObject("sender")
+            val endedSpeaker = sender?.optString("nickname")?.takeIf { it.isNotBlank() && it != "null" }
+                ?: sender?.optString("name")?.takeIf { it.isNotBlank() && it != "null" }
+            ui.launch {
+                (endedSpeaker ?: speakerLabel)?.let { lastSpeakerLabel = it }
+                remoteSpeaking = false
+                speakerLabel = null
+                RadioService.refresh(appRef)
+            }
             if (!o.has("transmission")) return@Listener
             val t = runCatching { Realtime.gson.fromJson(o.getJSONObject("transmission").toString(), RadioTransmission::class.java) }.getOrNull()
                 ?: return@Listener
@@ -356,7 +366,7 @@ object RadioManager {
         val wasTalking = talking
         remoteProducerId = null
         consumingProducerId = null
-        talking = false; remoteSpeaking = false; speakerLabel = null; txFailed = false
+        talking = false; remoteSpeaking = false; speakerLabel = null; lastSpeakerLabel = null; txFailed = false
         lastVoiceNote = null // la nota es por-canal; se recarga la del canal nuevo
         RadioService.update(appRef, channelName)
         // Salir/entrar al canal YA (NO dentro del hilo de audio): así la presencia y la
@@ -478,7 +488,6 @@ object RadioManager {
     private fun showRemoteSpeaker(producerId: String, label: String) {
         remoteProducerId = producerId
         ui.launch {
-            remoteSpeaking = true
             speakerLabel = label
             RadioService.refresh(appRef)
         }
@@ -489,6 +498,7 @@ object RadioManager {
         remoteProducerId = null
         ui.launch {
             if (remoteProducerId == null) {
+                speakerLabel?.let { lastSpeakerLabel = it }
                 remoteSpeaking = false
                 speakerLabel = null
                 RadioService.refresh(appRef)
@@ -531,7 +541,7 @@ object RadioManager {
             // Toma el audio del sistema (foco + modo llamada + ruta) para reproducir la voz.
             consuming = true
             acquireAudioSession()
-            ui.launch { remoteSpeaking = true; speakerLabel = speaker }
+            ui.launch { speakerLabel = speaker }
         } catch (t: Throwable) {
             // No tumbar la app si falla crear/arrancar el consumer (p.ej. al entrar
             // varios a la vez): la radio sigue viva y se reintenta en el próximo evento.
@@ -550,7 +560,12 @@ object RadioManager {
         snapshot.forEach { runCatching { it.close() } }
         consuming = false
         releaseAudioSession() // dejé de recibir: libera el audio si tampoco estoy hablando
-        ui.launch { remoteSpeaking = false; speakerLabel = null; RadioService.refresh(appRef) }
+        ui.launch {
+            speakerLabel?.let { lastSpeakerLabel = it }
+            remoteSpeaking = false
+            speakerLabel = null
+            RadioService.refresh(appRef)
+        }
     }
 
     /** Chirrido breve de grillo al abrir/cerrar PTT; suena por la ruta de voz activa. */
@@ -671,7 +686,6 @@ object RadioManager {
                         showRemoteSpeaker(activeId, label)
                         ui.launch {
                             talking = false
-                            remoteSpeaking = true
                             speakerLabel = label
                             RadioService.refresh(appRef)
                             appRef?.let {
@@ -690,7 +704,6 @@ object RadioManager {
                     else remoteProducerId = "reserved:$cid"
                     ui.launch {
                         talking = false
-                        remoteSpeaking = true
                         speakerLabel = label
                         RadioService.refresh(appRef)
                         appRef?.let {
@@ -869,18 +882,35 @@ object RadioManager {
         if (levelPolling) return
         levelPolling = true
         ui.launch {
+            var lastRemoteVoiceAt = 0L
             while (started) {
                 // Lee el stats nativo SOLO en el worker (mismo hilo que produce/consume/
                 // close): nunca se toca WebRTC desde dos hilos → sin crash al entrar varios.
                 val statsJson = when {
                     talking -> withContext(workerDispatcher) { runCatching { producer?.stats }.getOrNull() }
-                    remoteSpeaking -> withContext(workerDispatcher) { runCatching { consumers.values.firstOrNull()?.stats }.getOrNull() }
+                    consuming || consumers.isNotEmpty() -> withContext(workerDispatcher) { runCatching { consumers.values.firstOrNull()?.stats }.getOrNull() }
                     else -> null
                 }
                 // audioLevel de WebRTC es RMS (voz ≈ 0..0.3): lo amplificamos y suavizamos.
                 val raw = statsJson?.let { runCatching { parseAudioLevel(it) }.getOrNull() } ?: 0f
                 val target = (raw * 3.4f).coerceIn(0f, 1f)
                 audioLevel += (target - audioLevel) * 0.45f
+                if (!talking && (consuming || consumers.isNotEmpty())) {
+                    val now = System.currentTimeMillis()
+                    if (raw >= 0.018f) {
+                        lastRemoteVoiceAt = now
+                        if (!remoteSpeaking) {
+                            remoteSpeaking = true
+                            speakerLabel?.let { lastSpeakerLabel = it }
+                            RadioService.refresh(appRef)
+                        }
+                    } else if (remoteSpeaking && now - lastRemoteVoiceAt >= 1600L) {
+                        speakerLabel?.let { lastSpeakerLabel = it }
+                        remoteSpeaking = false
+                        speakerLabel = null
+                        RadioService.refresh(appRef)
+                    }
+                }
                 delay(120)
             }
             audioLevel = 0f
@@ -1145,7 +1175,7 @@ object RadioManager {
             started = false
             audioSessionActive = false
             consuming = false
-            ui.launch { connected = false; talking = false; remoteSpeaking = false; speakerLabel = null; audioLevel = 0f; connectedUsers = emptyList() }
+            ui.launch { connected = false; talking = false; remoteSpeaking = false; speakerLabel = null; lastSpeakerLabel = null; audioLevel = 0f; connectedUsers = emptyList() }
         }
     }
 

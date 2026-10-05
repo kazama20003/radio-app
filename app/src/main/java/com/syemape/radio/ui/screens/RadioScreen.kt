@@ -99,8 +99,8 @@ fun RadioScreen(
         Column(
             Modifier.weight(1f).fillMaxWidth()
                 .padding(horizontal = 12.dp)
-                .padding(bottom = bottomPadding + 76.dp, top = 6.dp),
-            verticalArrangement = Arrangement.spacedBy(5.dp),
+                .padding(bottom = bottomPadding + 76.dp, top = 10.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             if (RadioManager.channels.isNotEmpty()) {
                 Row(
@@ -114,7 +114,7 @@ fun RadioScreen(
                                 .background(if (selected) RadioColors.Ink else RadioColors.Card)
                                 .border(1.dp, RadioColors.Border, CircleShape)
                                 .clickable { RadioManager.selectChannel(channel.id) }
-                                .padding(horizontal = 12.dp, vertical = 5.dp),
+                                .padding(horizontal = 14.dp, vertical = 7.dp),
                         ) {
                             Text(
                                 channel.name ?: "Canal",
@@ -156,7 +156,7 @@ fun RadioScreen(
             }
 
             Box(
-                Modifier.fillMaxWidth().height(39.dp).clip(RoundedCornerShape(14.dp))
+                Modifier.fillMaxWidth().height(46.dp).clip(RoundedCornerShape(14.dp))
                     .background(RadioColors.Card).border(1.dp, RadioColors.Border, RoundedCornerShape(18.dp))
                     .padding(horizontal = 10.dp, vertical = 5.dp),
                 contentAlignment = Alignment.Center,
@@ -193,7 +193,7 @@ fun RadioScreen(
                 Text("${(RadioManager.callVolume * 100).toInt()}%", color = RadioColors.TextMuted, fontFamily = Outfit, fontSize = 11.sp)
             }
 
-            Box(Modifier.fillMaxWidth().weight(1f, fill = false).padding(top = 1.dp, bottom = 3.dp), contentAlignment = Alignment.Center) {
+            Box(Modifier.fillMaxWidth().weight(1f).padding(top = 3.dp, bottom = 3.dp), contentAlignment = Alignment.Center) {
                 HoldTalkButton(compact = true)
             }
         }
@@ -203,7 +203,7 @@ fun RadioScreen(
 @Composable
 private fun RadioHero(topPadding: Dp, onOpenSettings: () -> Unit, compact: Boolean = false) {
     Box(
-        Modifier.fillMaxWidth().height(if (compact) 128.dp else 184.dp).clip(RoundedCornerShape(bottomStart = 24.dp, bottomEnd = 24.dp)),
+        Modifier.fillMaxWidth().height(if (compact) 146.dp else 184.dp).clip(RoundedCornerShape(bottomStart = 24.dp, bottomEnd = 24.dp)),
     ) {
         Image(
             painter = painterResource(com.syemape.radio.R.drawable.radio_hero),
@@ -298,7 +298,7 @@ private fun RadioMemberCard() {
 @Composable
 private fun RadioActionCard(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, modifier: Modifier, onClick: () -> Unit) {
     Row(
-        modifier.height(38.dp).clip(RoundedCornerShape(12.dp)).background(RadioColors.Card)
+        modifier.height(43.dp).clip(RoundedCornerShape(14.dp)).background(RadioColors.Card)
             .border(1.dp, RadioColors.Border, RoundedCornerShape(14.dp)).clickable(onClick = onClick)
             .padding(horizontal = 11.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -315,18 +315,20 @@ private fun RadioSpeakerStatus() {
     val label = when {
         RadioManager.talking -> "TRANSMITIENDO"
         RadioManager.remoteSpeaking -> "HABLANDO AHORA"
+        RadioManager.lastSpeakerLabel != null -> "ÚLTIMO EN HABLAR"
         RadioManager.txFailed -> "ERROR DE TRANSMISIÓN"
         else -> "EN EL CANAL"
     }
     val name = when {
         RadioManager.talking -> "Tú · en el canal"
         RadioManager.remoteSpeaking -> RadioManager.speakerLabel ?: "En vivo"
+        RadioManager.lastSpeakerLabel != null -> RadioManager.lastSpeakerLabel!!
         RadioManager.txFailed -> "Vuelve a intentar hablar"
         else -> "En silencio"
     }
     Row(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(17.dp)).background(RadioColors.Card)
-            .border(1.dp, RadioColors.Border, RoundedCornerShape(14.dp)).padding(horizontal = 10.dp, vertical = 5.dp),
+            .border(1.dp, RadioColors.Border, RoundedCornerShape(14.dp)).padding(horizontal = 10.dp, vertical = 7.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(11.dp),
     ) {
@@ -355,13 +357,13 @@ private fun HoldTalkButton(compact: Boolean = false) {
     val brandRed = Color(0xFFD71920)
     Box(contentAlignment = Alignment.Center) {
         Box(
-            Modifier.size(if (compact) 150.dp else 178.dp).clip(CircleShape)
+            Modifier.size(if (compact) 180.dp else 190.dp).clip(CircleShape)
                 .background(if (talking) brandRed.copy(alpha = 0.13f) else brandRed.copy(alpha = 0.07f))
                 .border(3.dp, brandRed.copy(alpha = 0.45f), CircleShape),
         )
         Column(
             Modifier
-                .size(if (compact) 134.dp else 158.dp)
+                .size(if (compact) 160.dp else 170.dp)
                 .clip(CircleShape)
                 .background(
                     when {
@@ -393,15 +395,15 @@ private fun HoldTalkButton(compact: Boolean = false) {
             verticalArrangement = Arrangement.Center,
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            Icon(MapeIcons.Mic, null, tint = if (talking) Color.White else brandRed, modifier = Modifier.size(if (compact) 44.dp else 48.dp))
-            Spacer(Modifier.height(if (compact) 1.dp else 6.dp))
+            Icon(MapeIcons.Mic, null, tint = if (talking) Color.White else brandRed, modifier = Modifier.size(if (compact) 56.dp else 60.dp))
+            Spacer(Modifier.height(if (compact) 4.dp else 6.dp))
             Text(
                 when {
                     talking -> "CORTAR"
                     !ready -> "CONECTANDO…"
                     else -> "HABLAR"
                 },
-                color = if (talking) Color.White else brandRed, fontFamily = Outfit, fontWeight = FontWeight.Bold, fontSize = if (compact) 15.sp else 16.sp, letterSpacing = 1.2.sp,
+                color = if (talking) Color.White else brandRed, fontFamily = Outfit, fontWeight = FontWeight.Bold, fontSize = if (compact) 17.sp else 18.sp, letterSpacing = 1.2.sp,
             )
         }
     }
