@@ -393,6 +393,8 @@ object RadioManager {
 
     @Volatile private var setupDone = false
     @Volatile private var lastSetupAttemptAt = 0L
+    @Volatile private var rtpCapsAckTimeouts = 0
+    @Volatile private var lastSocketResetAt = 0L
 
     private fun setupMediasoup() {
         // Listo solo si ambos transports existen; si no, reintenta lo que falte.
@@ -406,7 +408,22 @@ object RadioManager {
         val cid = channelId ?: return
         val f = factory ?: return
         val caps = ack("ms:rtpCapabilities", timeoutMs = 1500) as? JSONObject
-        if (caps == null) { android.util.Log.w(TAG, "setupMediasoup: sin rtpCapabilities (socket.connected=${socket.connected()})"); return }
+        if (caps == null) {
+            val failures = ++rtpCapsAckTimeouts
+            android.util.Log.w(TAG, "setupMediasoup: sin rtpCapabilities (socket.connected=${socket.connected()}, fallos=$failures)")
+            // Socket.IO can report connected while its transport is no longer delivering
+            // acknowledgements. The watchdog retries setup every 2s; reset this namespace
+            // after a few missed acks instead of waiting ~30s for Engine.IO to fail itself.
+            val nowMs = System.currentTimeMillis()
+            if (socket.connected() && failures >= 3 && nowMs - lastSocketResetAt >= 15000) {
+                lastSocketResetAt = nowMs
+                rtpCapsAckTimeouts = 0
+                android.util.Log.w(TAG, "Reiniciando socket /radio tras $failures ACK perdidos")
+                runCatching { socket.disconnect(); socket.connect() }
+            }
+            return
+        }
+        rtpCapsAckTimeouts = 0
         if (!caps.optBoolean("ready", true)) {
             android.util.Log.i(TAG, "setupMediasoup: SFU aún inicia; se reintentará")
             return
