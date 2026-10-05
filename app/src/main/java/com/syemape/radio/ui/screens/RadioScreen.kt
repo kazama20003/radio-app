@@ -475,6 +475,9 @@ private fun TunerRuler(active: Boolean, level: Float, modifier: Modifier) {
     Canvas(modifier) {
         val w = size.width
         val h = size.height
+        // Compose can measure this Canvas at zero (or sub-pixel) size during
+        // transitions. Keep all drawing bounds valid until it gets space.
+        if (w <= 0f || h <= 0f) return@Canvas
         val n = 52
         val gap = w / n
         for (i in 0..n) {
@@ -484,7 +487,7 @@ private fun TunerRuler(active: Boolean, level: Float, modifier: Modifier) {
             val wave = kotlin.math.sin((t * 20f + phase).toDouble()).toFloat() * 0.6f +
                 kotlin.math.sin((t * 37f - phase * 1.6f).toDouble()).toFloat() * 0.4f
             val norm = (0.5f + 0.5f * wave).coerceIn(0f, 1f)
-            val tickH = (h * (0.14f + 0.46f * amp * env * norm)).coerceIn(3f, h)
+            val tickH = (h * (0.14f + 0.46f * amp * env * norm)).coerceIn(0f, h)
             drawLine(
                 color = if (active) tickActive else tickColor,
                 start = Offset(x, h / 2f - tickH / 2f),
@@ -512,13 +515,17 @@ private fun VolumeSlider(modifier: Modifier) {
             .height(34.dp)
             .pointerInput(Unit) {
                 detectTapGestures { pos ->
-                    RadioManager.setVolume((pos.x / size.width).coerceIn(0f, 1f))
+                    if (size.width > 0) {
+                        RadioManager.setVolume((pos.x / size.width).coerceIn(0f, 1f))
+                    }
                 }
             }
             .pointerInput(Unit) {
                 detectHorizontalDragGestures { change, _ ->
                     change.consume()
-                    RadioManager.setVolume((change.position.x / size.width).coerceIn(0f, 1f))
+                    if (size.width > 0) {
+                        RadioManager.setVolume((change.position.x / size.width).coerceIn(0f, 1f))
+                    }
                 }
             },
         contentAlignment = Alignment.CenterStart,
