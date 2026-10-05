@@ -37,6 +37,7 @@ import org.webrtc.PeerConnectionFactory
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Cliente de radio push-to-talk por mediasoup SFU (interopera con la app RN).
@@ -63,6 +64,8 @@ object RadioManager {
 
     private val ui = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val worker = Executors.newSingleThreadExecutor()
+    // Evita que la UI y el botón de notificación inicien dos PTT en la misma ventana.
+    private val pttStartInProgress = AtomicBoolean(false)
     // Dispatcher sobre el MISMO hilo worker: permite leer stats nativos serializados
     // con produce/consume/close (nunca dos hilos tocando WebRTC a la vez → sin crash).
     private val workerDispatcher = worker.asCoroutineDispatcher()
@@ -200,6 +203,7 @@ object RadioManager {
         })
         val onRadioConnect = Emitter.Listener {
             worker.execute {
+                pttStartInProgress.set(false)
                 // En una reconexión los transports/producer del servidor son nuevos:
                 // descartamos los viejos (muertos) para que setupMediasoup los rearme.
                 setupDone = false
@@ -651,14 +655,20 @@ object RadioManager {
     }
 
     fun startTalking() {
-        if (talking) return
+        if (!pttStartInProgress.compareAndSet(false, true)) return
+        if (talking) {
+            pttStartInProgress.set(false)
+            return
+        }
         if (remoteSpeaking || remoteProducerId != null) {
+            pttStartInProgress.set(false)
             val who = speakerLabel ?: "Alguien"
             appRef?.let { android.widget.Toast.makeText(it, "$who está hablando", android.widget.Toast.LENGTH_SHORT).show() }
             return
         }
         val app = appRef
         if (app == null || !hasMicPermission(app)) {
+            pttStartInProgress.set(false)
             txFailed = true
             app?.let { android.widget.Toast.makeText(it, "Activa el permiso de micrófono para hablar", android.widget.Toast.LENGTH_SHORT).show() }
             RadioService.refresh(app)
@@ -669,6 +679,7 @@ object RadioManager {
         // (el síntoma "decía conectado pero no se guardó"). Forzamos reconexión/rearme;
         // cuando quede "En vivo" (connected=true) ya se puede hablar y se graba.
         if (!isChannelReady()) {
+            pttStartInProgress.set(false)
             reconnectAndSetup()
             return
         }
@@ -679,6 +690,7 @@ object RadioManager {
         RadioService.refresh(appRef) // notificación → "Cortar"
         worker.execute {
             fun fail() {
+                pttStartInProgress.set(false)
                 channelId?.let { socket.emit("ms:releaseReservation", JSONObject().put("channelId", it)) }
                 runCatching { audioManager?.enabled = false }
                 ui.launch {
@@ -707,6 +719,7 @@ object RadioManager {
                     if (reservationsSupported == null) reservationsSupported = false
                     val activeId = current.optString("producerId").takeIf { it.isNotBlank() }
                     if (activeId != null) {
+                        pttStartInProgress.set(false)
                         val label = speakerAliasFrom(current)
                         showRemoteSpeaker(activeId, label)
                         ui.launch {
@@ -723,27 +736,30 @@ object RadioManager {
                     reservation = JSONObject().put("ok", true) // ruta compatible con backend anterior
                 }
                 if (reservation?.optBoolean("ok") != true) {
+                    pttStartInProgress.set(false)
                     val producerId = reservation?.optString("producerId")?.takeIf { it.isNotBlank() }
                     val label = reservation?.let { speakerAliasFrom(it) } ?: "Alguien del canal"
                     if (producerId != null) showRemoteSpeaker(producerId, label)
-                    else remoteProducerId = "reserved:$cid"
                     ui.launch {
                         talking = false
                         speakerLabel = label
                         RadioService.refresh(appRef)
                         appRef?.let {
-                            android.widget.Toast.makeText(it, "$label está hablando", android.widget.Toast.LENGTH_SHORT).show()
+                            val message = if (producerId != null) "$label está hablando" else "El canal está ocupado; $label intenta hablar"
+                            android.widget.Toast.makeText(it, message, android.widget.Toast.LENGTH_SHORT).show()
                         }
                     }
                     if (producerId != null) consume(producerId, label)
                     return@execute
                 }
                 if (!talking) {
+                    pttStartInProgress.set(false)
                     socket.emit("ms:releaseReservation", JSONObject().put("channelId", cid))
                     return@execute
                 }
                 acquireAudioSession() // foco + modo llamada + ruta (en el worker)
                 if (!talking) { // el usuario soltó enseguida
+                    pttStartInProgress.set(false)
                     runCatching { audioManager?.enabled = false }
                     releaseAudioSession()
                     return@execute
@@ -757,14 +773,19 @@ object RadioManager {
                 }, track)
             } catch (t: Throwable) {
                 // Atrapa cualquier error (incluidos los no-Exception) para NO tumbar la app.
+                android.util.Log.e(TAG, "PTT no pudo iniciar; se libera el intento sin cerrar la app", t)
                 fail()
             }
         }
     }
 
     fun stopTalking() {
-        if (!talking) return
+        if (!talking) {
+            pttStartInProgress.set(false)
+            return
+        }
         talking = false // instantáneo en UI
+        pttStartInProgress.set(false)
         beep(120) // chirrido corto al soltar PTT
         RadioService.refresh(appRef) // notificación → "Hablar"
         worker.execute {
@@ -1201,6 +1222,7 @@ object RadioManager {
             }
             RadioService.stop(appRef)
             setupDone = false
+            pttStartInProgress.set(false)
             started = false
             audioSessionActive = false
             consuming = false
