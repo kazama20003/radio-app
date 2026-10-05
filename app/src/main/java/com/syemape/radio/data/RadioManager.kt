@@ -38,6 +38,7 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * Cliente de radio push-to-talk por mediasoup SFU (interopera con la app RN).
@@ -66,6 +67,7 @@ object RadioManager {
     private val worker = Executors.newSingleThreadExecutor()
     // Evita que la UI y el botón de notificación inicien dos PTT en la misma ventana.
     private val pttStartInProgress = AtomicBoolean(false)
+    private val chirpsInFlight = AtomicInteger(0)
     // Dispatcher sobre el MISMO hilo worker: permite leer stats nativos serializados
     // con produce/consume/close (nunca dos hilos tocando WebRTC a la vez → sin crash).
     private val workerDispatcher = worker.asCoroutineDispatcher()
@@ -609,13 +611,14 @@ object RadioManager {
     }
 
     /** Chirrido de grillo al abrir/cerrar PTT; reproducción aparte para no retrasar la voz. */
-    private fun beep(durationMs: Int) {
+    private fun beep(durationMs: Int, waitUntilPlayed: Boolean = false) {
         if (Prefs.radioSound == false) return
-        Thread({
+        chirpsInFlight.incrementAndGet()
+        val playback = Runnable {
             var track: android.media.AudioTrack? = null
             try {
                 val sampleRate = 24_000
-                // Un trillito de varias notas cortas, más reconocible y audible que el pitido tenue anterior.
+                // Varias notas agudas con ataque y caída corta, para que suene a grillo.
                 val chirpMs = if (durationMs >= 140) 36 else 28
                 val gapMs = 22
                 val chirpCount = if (durationMs >= 140) 6 else 3
@@ -631,20 +634,31 @@ object RadioManager {
                     val progress = within.toDouble() / chirpSamples
                     val frequency = 3_200.0 + 1_050.0 * progress + 260.0 * kotlin.math.sin(progress * Math.PI)
                     val sample = kotlin.math.sin(2.0 * Math.PI * frequency * within / sampleRate)
-                    pcm[i] = (sample * envelope * 0.88 * Short.MAX_VALUE).toInt().toShort()
+                    pcm[i] = (sample * envelope * 0.98 * Short.MAX_VALUE).toInt().toShort()
                 }
-                track = android.media.AudioTrack(
-                    AudioManager.STREAM_VOICE_CALL,
-                    sampleRate,
-                    android.media.AudioFormat.CHANNEL_OUT_MONO,
-                    android.media.AudioFormat.ENCODING_PCM_16BIT,
-                    pcm.size * 2,
-                    android.media.AudioTrack.MODE_STATIC,
-                )
+                val audioFormat = android.media.AudioFormat.Builder()
+                    .setSampleRate(sampleRate)
+                    .setChannelMask(android.media.AudioFormat.CHANNEL_OUT_MONO)
+                    .setEncoding(android.media.AudioFormat.ENCODING_PCM_16BIT)
+                    .build()
+                val audioAttributes = android.media.AudioAttributes.Builder()
+                    .setUsage(android.media.AudioAttributes.USAGE_VOICE_COMMUNICATION)
+                    .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                    .build()
+                track = android.media.AudioTrack.Builder()
+                    .setAudioAttributes(audioAttributes)
+                    .setAudioFormat(audioFormat)
+                    .setBufferSizeInBytes(pcm.size * 2)
+                    .setTransferMode(android.media.AudioTrack.MODE_STATIC)
+                    .build()
                 if (track.state == android.media.AudioTrack.STATE_INITIALIZED) {
                     track.setVolume(1.0f)
+                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+                        val route = audioMgr()?.communicationDevice
+                        if (route != null) runCatching { track.setPreferredDevice(route) }
+                    }
                     val written = track.write(pcm, 0, pcm.size)
-                    if (written > 0) {
+                    if (written == pcm.size) {
                         track.play()
                         Thread.sleep(totalSamples * 1000L / sampleRate + 60)
                     } else {
@@ -657,8 +671,17 @@ object RadioManager {
                 android.util.Log.e(TAG, "Error al reproducir el chirrido PTT", e)
             } finally {
                 runCatching { track?.release() }
+                if (chirpsInFlight.decrementAndGet() == 0 && !talking && !consuming) {
+                    runCatching { worker.execute { releaseAudioSession() } }
+                }
             }
-        }, "mape-cricket-chirp").apply { isDaemon = true }.start()
+        }
+        if (waitUntilPlayed) playback.run()
+        else runCatching { Thread(playback, "mape-cricket-chirp").apply { isDaemon = true }.start() }
+            .onFailure {
+                chirpsInFlight.decrementAndGet()
+                android.util.Log.e(TAG, "No se pudo iniciar el chirrido PTT", it)
+            }
     }
 
     /** El canal está realmente listo para transmitir (socket + ambos transportes). */
@@ -725,6 +748,12 @@ object RadioManager {
             }
             try {
                 val cid = channelId ?: return@execute fail()
+                if (!talking) {
+                    pttStartInProgress.set(false)
+                    return@execute
+                }
+                acquireAudioSession() // fija el dispositivo antes del chirrido
+                beep(150) // feedback al pulsar PTT, sin esperar el ack del servidor
                 var reservation: JSONObject? = null
                 if (reservationsSupported != false) {
                     reservation = ack(
@@ -773,21 +802,15 @@ object RadioManager {
                         }
                     }
                     if (producerId != null) consume(producerId, label)
+                    else ui.launch { releaseAudioSession() }
                     return@execute
                 }
                 if (!talking) {
                     pttStartInProgress.set(false)
                     socket.emit("ms:releaseReservation", JSONObject().put("channelId", cid))
-                    return@execute
-                }
-                acquireAudioSession() // foco + modo llamada + ruta (en el worker)
-                if (!talking) { // el usuario soltó enseguida
-                    pttStartInProgress.set(false)
-                    runCatching { audioManager?.enabled = false }
                     releaseAudioSession()
                     return@execute
                 }
-                beep(150) // confirma el inicio de la transmisión
                 runCatching { audioManager?.enabled = true } // micro en el MISMO hilo que produce
                 val send = sendTransport ?: return@execute fail()
                 val track = audioManager?.track ?: return@execute fail()
@@ -809,10 +832,10 @@ object RadioManager {
         }
         talking = false // instantáneo en UI
         pttStartInProgress.set(false)
-        beep(120) // chirrido corto al soltar PTT
         RadioService.refresh(appRef) // notificación → "Hablar"
         worker.execute {
             runCatching { audioManager?.enabled = false } // silencia el micro en el worker
+            beep(120, waitUntilPlayed = true) // mantener activa la ruta hasta terminar el chirrido
             runCatching { producer?.close() }
             producer = null
             runCatching { socket.emit("ms:closeProducer") }
@@ -1249,7 +1272,7 @@ object RadioManager {
 
     /** Libera el audio del sistema cuando ya no hay voz (ni hablo ni recibo). */
     private fun releaseAudioSession() {
-        if (talking || consuming || notePlayer != null) return // sigue habiendo voz
+        if (talking || consuming || notePlayer != null || chirpsInFlight.get() > 0) return // sigue habiendo audio
         if (!audioSessionActive) return
         audioSessionActive = false
         abandonAudioFocus() // soltamos el foco: otras apps vuelven a sonar

@@ -16,7 +16,6 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
@@ -27,6 +26,8 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -194,8 +195,14 @@ fun RadioScreen(
                 Text("${(RadioManager.callVolume * 100).toInt()}%", color = RadioColors.TextMuted, fontFamily = Outfit, fontSize = 11.sp)
             }
 
-            Box(Modifier.fillMaxWidth().weight(1f).padding(top = 3.dp, bottom = 12.dp), contentAlignment = Alignment.BottomCenter) {
-                HoldTalkButton(compact = true)
+            BoxWithConstraints(
+                Modifier.fillMaxWidth().weight(1f).padding(top = 3.dp, bottom = 8.dp),
+                contentAlignment = Alignment.BottomCenter,
+            ) {
+                // Phones with a short display get a smaller PTT target instead of
+                // pushing the microphone below the bottom navigation bar.
+                val micSize = minOf(maxWidth, maxHeight, 220.dp)
+                if (micSize > 0.dp) HoldTalkButton(size = micSize)
             }
         }
     }
@@ -297,15 +304,14 @@ private fun RadioMemberCard() {
         Avatar(initialsOf(firstAlias), avatarColor(firstUser?.id?.takeIf { it.isNotBlank() } ?: firstAlias), size = 38.dp)
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Text("${RadioManager.members} CONECTADOS", color = RadioColors.TextMuted, fontFamily = Outfit, fontWeight = FontWeight.Bold, fontSize = 9.sp, maxLines = 1)
-            FlowRow(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                verticalArrangement = Arrangement.spacedBy(2.dp),
-            ) {
-                if (aliases.isEmpty()) {
-                    Text("Esperando conectados…", color = RadioColors.TextMuted, fontFamily = Outfit, fontWeight = FontWeight.SemiBold, fontSize = 10.sp, maxLines = 1)
-                } else {
-                    aliases.forEach { alias ->
+            if (aliases.isEmpty()) {
+                Text("Esperando conectados…", color = RadioColors.TextMuted, fontFamily = Outfit, fontWeight = FontWeight.SemiBold, fontSize = 10.sp, maxLines = 1)
+            } else {
+                LazyColumn(
+                    modifier = Modifier.fillMaxWidth().height(42.dp),
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                ) {
+                    items(aliases) { alias ->
                         Text(
                             text = alias,
                             modifier = Modifier.clip(CircleShape)
@@ -381,19 +387,20 @@ private fun RadioSpeakerStatus() {
 }
 
 @Composable
-private fun HoldTalkButton(compact: Boolean = false) {
+private fun HoldTalkButton(size: Dp) {
     val talking = RadioManager.talking
     val ready = RadioManager.connected // true solo cuando el canal de audio está listo
     val brandRed = Color(0xFFD71920)
+    val buttonSize = size * 0.89f
     Box(contentAlignment = Alignment.Center) {
         Box(
-            Modifier.size(if (compact) 180.dp else 190.dp).clip(CircleShape)
+            Modifier.size(size).clip(CircleShape)
                 .background(if (talking) brandRed.copy(alpha = 0.13f) else brandRed.copy(alpha = 0.07f))
-                .border(3.dp, brandRed.copy(alpha = 0.45f), CircleShape),
+                .border(2.dp, brandRed.copy(alpha = 0.45f), CircleShape),
         )
         Column(
             Modifier
-                .size(if (compact) 160.dp else 170.dp)
+                .size(buttonSize)
                 .clip(CircleShape)
                 .background(
                     when {
@@ -402,7 +409,7 @@ private fun HoldTalkButton(compact: Boolean = false) {
                         else -> RadioColors.Card
                     },
                 )
-                .border(3.dp, brandRed, CircleShape)
+                .border(2.dp, brandRed, CircleShape)
                 .pointerInput(ready) {
                     if (!ready) return@pointerInput
                     // PTT a prueba de cancelación: empieza al tocar y SOLO termina cuando se
@@ -425,15 +432,15 @@ private fun HoldTalkButton(compact: Boolean = false) {
             verticalArrangement = Arrangement.Center,
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            Icon(MapeIcons.Mic, null, tint = if (talking) Color.White else brandRed, modifier = Modifier.size(if (compact) 56.dp else 60.dp))
-            Spacer(Modifier.height(if (compact) 4.dp else 6.dp))
+            Icon(MapeIcons.Mic, null, tint = if (talking) Color.White else brandRed, modifier = Modifier.size((buttonSize * 0.35f).coerceAtMost(60.dp)))
+            Spacer(Modifier.height(buttonSize * 0.025f))
             Text(
                 when {
                     talking -> "CORTAR"
                     !ready -> "CONECTANDO…"
                     else -> "HABLAR"
                 },
-                color = if (talking) Color.White else brandRed, fontFamily = Outfit, fontWeight = FontWeight.Bold, fontSize = if (compact) 17.sp else 18.sp, letterSpacing = 1.2.sp,
+                color = if (talking) Color.White else brandRed, fontFamily = Outfit, fontWeight = FontWeight.Bold, fontSize = (buttonSize.value * 0.105f).coerceAtMost(18f).sp, letterSpacing = 1.2.sp,
             )
         }
     }
