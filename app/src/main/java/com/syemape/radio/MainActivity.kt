@@ -2,6 +2,7 @@ package com.syemape.radio
 
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.background
@@ -111,6 +112,22 @@ private fun AppRoot(onDarkModeChanged: (Boolean) -> Unit) {
 
         AuthStatus.Authenticated -> {
           val context = androidx.compose.ui.platform.LocalContext.current
+          BackHandler(enabled = true) {
+              when {
+                  openSub != null -> openSub = null
+                  openChannelChat != null -> openChannelChat = null
+                  openChat != null -> openChat = null
+                  tab != Tab.Mapa -> {
+                      tab = Tab.Mapa
+                      com.syemape.radio.data.Prefs.lastTab = Tab.Mapa.name
+                  }
+                  else -> android.widget.Toast.makeText(
+                      context,
+                      "MAPE está en inicio",
+                      android.widget.Toast.LENGTH_SHORT,
+                  ).show()
+              }
+          }
           val permLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
               androidx.activity.result.contract.ActivityResultContracts.RequestMultiplePermissions()
           ) { result ->

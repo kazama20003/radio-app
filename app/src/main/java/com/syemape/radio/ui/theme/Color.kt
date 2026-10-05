@@ -11,11 +11,13 @@ import androidx.compose.runtime.setValue
 object MapeColors {
     var darkMode by mutableStateOf(false)
     val Bg get() = if (darkMode) Color(0xFF101010) else Color(0xFFF4F4F4)
-    val Ink = Color(0xFF0A0A0A)          // negro principal (botones, textos, nav)
-    val White = Color(0xFFFFFFFF)
-    val Red = Color(0xFF111111)          // alias conservado para los acentos existentes
-    val Blue = Color(0xFF111111)
-    val RedDark = Color(0xFF111111)
+    // Los colores de acción y sus contenidos se invierten juntos en oscuro para
+    // que botones, etiquetas y controles mantengan contraste en toda la app.
+    val Ink get() = if (darkMode) Color(0xFFE8E8E8) else Color(0xFF0A0A0A)
+    val White get() = if (darkMode) Color(0xFF171717) else Color(0xFFFFFFFF)
+    val Red get() = if (darkMode) Color(0xFFE8E8E8) else Color(0xFF111111)
+    val Blue get() = if (darkMode) Color(0xFFE8E8E8) else Color(0xFF111111)
+    val RedDark get() = if (darkMode) Color(0xFFE8E8E8) else Color(0xFF111111)
     val RedSoftBg get() = if (darkMode) Color(0xFF292929) else Color(0xFFEAEAEA)
     val Card get() = if (darkMode) Color(0xFF1D1D1D) else Color(0xFFFFFFFF)
     val PanelDark = Color(0xFF1A1A1A)    // superficies dentro de cabeceras oscuras
