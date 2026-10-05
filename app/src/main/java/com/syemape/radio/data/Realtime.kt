@@ -31,7 +31,16 @@ object Realtime {
         val opts = IO.Options().apply {
             // Polling + WebSocket: conecta YA por polling (rápido y compatible con proxies)
             // y sube a WebSocket. Antes, solo-WebSocket tardaba/reintentaba el handshake.
-            transports = arrayOf(Polling.NAME, WebSocket.NAME)
+            // Radio usa su propia sesión de Engine.IO en polling: las otras namespaces
+            // comparten manager y un upgrade WebSocket atascado dejaba sus ACK colgados
+            // hasta que el transporte común fallaba (~30s después).
+            if (namespace == "/radio") {
+                forceNew = true
+                multiplex = false
+                transports = arrayOf(Polling.NAME)
+            } else {
+                transports = arrayOf(Polling.NAME, WebSocket.NAME)
+            }
             reconnection = true
             reconnectionAttempts = Int.MAX_VALUE
             reconnectionDelay = 500

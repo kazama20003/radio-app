@@ -85,6 +85,8 @@ object RadioManager {
     private var sysAudio: AudioManager? = null
 
     private val socket get() = Realtime.socket("/radio")
+    private var radioConnectListener: Emitter.Listener? = null
+    private var radioDisconnectListener: Emitter.Listener? = null
 
     fun hasMicPermission(context: Context): Boolean =
         context.checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
@@ -134,7 +136,9 @@ object RadioManager {
         sysAudio = app.getSystemService(Context.AUDIO_SERVICE) as AudioManager
         registerConnectivity(app) // estado de internet para el indicador de señal
         // Listeners + conexión del socket
-        socket.off("ms:newProducer"); socket.off("ms:producerClosed"); socket.off("connect"); socket.off("disconnect"); socket.off("channel:presence")
+        radioConnectListener?.let { socket.off("connect", it) }
+        radioDisconnectListener?.let { socket.off("disconnect", it) }
+        socket.off("ms:newProducer"); socket.off("ms:producerClosed"); socket.off("channel:presence")
         socket.on("channel:presence", Emitter.Listener { args ->
             val o = args.firstOrNull() as? JSONObject ?: return@Listener
             if (o.optString("channelId") == channelId) {
@@ -194,7 +198,7 @@ object RadioManager {
                 ?: return@Listener
             if (!t.audioKey.isNullOrBlank()) ui.launch { lastVoiceNote = t }
         })
-        socket.on("connect", Emitter.Listener {
+        val onRadioConnect = Emitter.Listener {
             worker.execute {
                 // En una reconexión los transports/producer del servidor son nuevos:
                 // descartamos los viejos (muertos) para que setupMediasoup los rearme.
@@ -208,9 +212,13 @@ object RadioManager {
                 runCatching { setupMediasoup() } // rearma transportes tras reconectar
                 ui.launch { connected = isChannelReady() } // En vivo solo si el audio quedó listo
             }
-        })
+        }
+        radioConnectListener = onRadioConnect
+        socket.on("connect", onRadioConnect)
         // El socket se cayó: refleja "desconectado" en la UI (ya no mentimos "En vivo").
-        socket.on("disconnect", Emitter.Listener { ui.launch { connected = false } })
+        val onRadioDisconnect = Emitter.Listener { ui.launch { connected = false } }
+        radioDisconnectListener = onRadioDisconnect
+        socket.on("disconnect", onRadioDisconnect)
         if (!socket.connected()) socket.connect()
 
         speakerOn = Prefs.speakerOn
@@ -1175,7 +1183,11 @@ object RadioManager {
             runCatching { recvTransport?.close() }; recvTransport = null
             runCatching { device?.dispose() }; device = null
             channelId?.let { radioSocket.emit("channel:leave", it) }
-            radioSocket.off("ms:newProducer"); radioSocket.off("ms:producerClosed"); radioSocket.off("connect")
+            radioSocket.off("ms:newProducer"); radioSocket.off("ms:producerClosed")
+            radioConnectListener?.let { radioSocket.off("connect", it) }
+            radioDisconnectListener?.let { radioSocket.off("disconnect", it) }
+            radioConnectListener = null
+            radioDisconnectListener = null
             abandonAudioFocus()
             runCatching {
                 audioCallback?.let { sysAudio?.unregisterAudioDeviceCallback(it) }; audioCallback = null
