@@ -645,22 +645,36 @@ object RadioManager {
                     .setUsage(android.media.AudioAttributes.USAGE_VOICE_COMMUNICATION)
                     .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SONIFICATION)
                     .build()
+                val minBuffer = android.media.AudioTrack.getMinBufferSize(
+                    sampleRate,
+                    android.media.AudioFormat.CHANNEL_OUT_MONO,
+                    android.media.AudioFormat.ENCODING_PCM_16BIT,
+                ).coerceAtLeast(0)
                 track = android.media.AudioTrack.Builder()
                     .setAudioAttributes(audioAttributes)
                     .setAudioFormat(audioFormat)
-                    .setBufferSizeInBytes(pcm.size * 2)
-                    .setTransferMode(android.media.AudioTrack.MODE_STATIC)
+                    .setBufferSizeInBytes(maxOf(pcm.size * 2, minBuffer))
+                    .setTransferMode(android.media.AudioTrack.MODE_STREAM)
                     .build()
                 if (track.state == android.media.AudioTrack.STATE_INITIALIZED) {
                     track.setVolume(1.0f)
+                    var preferredDeviceType: Int? = null
                     if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
                         val route = audioMgr()?.communicationDevice
-                        if (route != null) runCatching { track.setPreferredDevice(route) }
+                        if (route != null) {
+                            preferredDeviceType = route.type
+                            val selected = runCatching { track.setPreferredDevice(route) }.getOrDefault(false)
+                            android.util.Log.i(TAG, "PTT chirp preferred device=${route.type} selected=$selected")
+                        }
                     }
-                    val written = track.write(pcm, 0, pcm.size)
+                    track.play()
+                    val written = track.write(pcm, 0, pcm.size, android.media.AudioTrack.WRITE_BLOCKING)
                     if (written == pcm.size) {
-                        track.play()
-                        Thread.sleep(totalSamples * 1000L / sampleRate + 60)
+                        android.util.Log.i(TAG, "PTT chirp playing state=${track.state} device=$preferredDeviceType frames=$written volume=1.0")
+                        val deadline = android.os.SystemClock.uptimeMillis() + totalSamples * 1000L / sampleRate + 500L
+                        while (track.playbackHeadPosition < written && android.os.SystemClock.uptimeMillis() < deadline) {
+                            Thread.sleep(10)
+                        }
                     } else {
                         android.util.Log.w(TAG, "No se pudo escribir el chirrido PTT: $written")
                     }
@@ -753,6 +767,7 @@ object RadioManager {
                     return@execute
                 }
                 acquireAudioSession() // fija el dispositivo antes del chirrido
+                awaitSelectedCommunicationRoute()
                 beep(150) // feedback al pulsar PTT, sin esperar el ack del servidor
                 var reservation: JSONObject? = null
                 if (reservationsSupported != false) {
