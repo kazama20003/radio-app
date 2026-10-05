@@ -412,10 +412,10 @@ object RadioManager {
             val failures = ++rtpCapsAckTimeouts
             android.util.Log.w(TAG, "setupMediasoup: sin rtpCapabilities (socket.connected=${socket.connected()}, fallos=$failures)")
             // Socket.IO can report connected while its transport is no longer delivering
-            // acknowledgements. The watchdog retries setup every 2s; reset this namespace
-            // after a few missed acks instead of waiting ~30s for Engine.IO to fail itself.
+            // acknowledgements. Reset this namespace on the first lost ack instead of
+            // waiting ~30s for Engine.IO to fail itself.
             val nowMs = System.currentTimeMillis()
-            if (socket.connected() && failures >= 3 && nowMs - lastSocketResetAt >= 15000) {
+            if (socket.connected() && failures >= 1 && nowMs - lastSocketResetAt >= 4000) {
                 lastSocketResetAt = nowMs
                 rtpCapsAckTimeouts = 0
                 android.util.Log.w(TAG, "Reiniciando socket /radio tras $failures ACK perdidos")
