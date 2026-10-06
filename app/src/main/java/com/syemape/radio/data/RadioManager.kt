@@ -124,6 +124,8 @@ object RadioManager {
     }
 
     @Volatile private var started = false
+    @Volatile private var stopping = false
+    @Volatile private var pendingRestart: Application? = null
     @Volatile private var audioSessionActive = false // true SOLO mientras hay voz (foco + modo llamada)
     @Volatile private var consuming = false           // recibiendo voz de alguien
 
@@ -135,6 +137,10 @@ object RadioManager {
 
     /** Arranca la radio: entra al canal rápido y prepara WebRTC/mediasoup en 2º plano. */
     fun start(app: Application) {
+        if (stopping) {
+            pendingRestart = app
+            return
+        }
         if (started) return // ya corriendo (sigue vivo entre pestañas / en 2º plano)
         started = true
         appRef = app
@@ -658,7 +664,6 @@ object RadioManager {
                     .setTransferMode(android.media.AudioTrack.MODE_STREAM)
                     .build()
                 if (track.state == android.media.AudioTrack.STATE_INITIALIZED) {
-                    track.setVolume(1.0f)
                     var preferredDeviceType: Int? = null
                     if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
                         val route = audioMgr()?.communicationDevice
@@ -668,10 +673,19 @@ object RadioManager {
                             android.util.Log.i(TAG, "PTT chirp preferred device=${route.type} selected=$selected")
                         }
                     }
+                    // El chirrido es muy agudo y a volumen completo puede lastimar
+                    // en audífonos Bluetooth. Atenuar solo esa ruta; teléfono/altavoz
+                    // conserva el nivel anterior.
+                    val bluetoothRoute = preferredDeviceType == android.media.AudioDeviceInfo.TYPE_BLUETOOTH_SCO ||
+                        preferredDeviceType == android.media.AudioDeviceInfo.TYPE_BLE_HEADSET ||
+                        preferredDeviceType == android.media.AudioDeviceInfo.TYPE_BLE_SPEAKER ||
+                        (preferredDeviceType == null && isBluetoothCommunicationRoute())
+                    val chirpVolume = if (bluetoothRoute) 0.12f else 1.0f
+                    track.setVolume(chirpVolume)
                     track.play()
                     val written = track.write(pcm, 0, pcm.size, android.media.AudioTrack.WRITE_BLOCKING)
                     if (written == pcm.size) {
-                        android.util.Log.i(TAG, "PTT chirp playing state=${track.state} device=$preferredDeviceType frames=$written volume=1.0")
+                        android.util.Log.i(TAG, "PTT chirp playing state=${track.state} device=$preferredDeviceType frames=$written volume=$chirpVolume")
                         val deadline = android.os.SystemClock.uptimeMillis() + totalSamples * 1000L / sampleRate + 500L
                         while (track.playbackHeadPosition < written && android.os.SystemClock.uptimeMillis() < deadline) {
                             Thread.sleep(10)
@@ -1361,7 +1375,20 @@ object RadioManager {
         }
     }
 
-    fun stop() {
+    fun stop(stopService: Boolean = true) {
+        if (stopping) return
+        stopping = true
+        started = false // termina el watchdog de inmediato, antes del cierre nativo
+        pttStartInProgress.set(false)
+        ui.launch {
+            connected = false
+            talking = false
+            remoteSpeaking = false
+            speakerLabel = null
+            lastSpeakerLabel = null
+            audioLevel = 0f
+            connectedUsers = emptyList()
+        }
         val radioSocket = socket
         worker.execute {
             runCatching { producer?.close() }; producer = null
@@ -1386,13 +1413,14 @@ object RadioManager {
                 if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) sysAudio?.clearCommunicationDevice()
                 sysAudio?.mode = AudioManager.MODE_NORMAL
             }
-            RadioService.stop(appRef)
+            if (stopService) RadioService.stop(appRef)
             setupDone = false
-            pttStartInProgress.set(false)
-            started = false
             audioSessionActive = false
             consuming = false
-            ui.launch { connected = false; talking = false; remoteSpeaking = false; speakerLabel = null; lastSpeakerLabel = null; audioLevel = 0f; connectedUsers = emptyList() }
+            stopping = false
+            val restart = pendingRestart
+            pendingRestart = null
+            if (restart != null) ui.launch { start(restart) }
         }
     }
 

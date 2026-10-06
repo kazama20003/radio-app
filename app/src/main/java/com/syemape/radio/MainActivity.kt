@@ -67,7 +67,13 @@ class MainActivity : ComponentActivity() {
      *  suspendió en 2º plano). Seguro aunque la radio no esté activa. */
     override fun onResume() {
         super.onResume()
-        runCatching { com.syemape.radio.data.RadioManager.ensureAlive() }
+        runCatching {
+            if (com.syemape.radio.data.Backend.tokens.accessToken != null) {
+                com.syemape.radio.data.RadioManager.start(application as android.app.Application)
+            } else {
+                com.syemape.radio.data.RadioManager.ensureAlive()
+            }
+        }
     }
 }
 

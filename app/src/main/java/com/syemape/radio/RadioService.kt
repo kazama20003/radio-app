@@ -22,10 +22,15 @@ class RadioService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_STOP) {
-            runCatching { com.syemape.radio.data.RadioManager.stop() } // corta socket + audio
+            // Cierra el motor en segundo plano sin que el propio manager vuelva a
+            // detener una instancia nueva del servicio si el usuario abre la app.
+            runCatching { com.syemape.radio.data.RadioManager.stop(stopService = false) }
             releaseWakeLock()
             stopForegroundCompat()
-            stopSelf()
+            runCatching {
+                (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).cancel(NOTIF_ID)
+            }
+            stopSelfResult(startId)
             return START_NOT_STICKY
         }
         // Botón "Hablar"/"Cortar" de la notificación: transmite en el CANAL ACTUAL.
