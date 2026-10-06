@@ -84,6 +84,10 @@ object RadioManager {
     var channelId: String? = null; private set
     @Volatile private var remoteProducerId: String? = null
     @Volatile private var consumingProducerId: String? = null
+    @Volatile private var lastInboundBytesReceived = -1L
+    @Volatile private var lastInboundProgressAt = 0L
+    @Volatile private var lastConsumerRecoveryAt = 0L
+    private val consumerRecoveryInProgress = AtomicBoolean(false)
     @Volatile private var reservationsSupported: Boolean? = null
     @Volatile private var openChatChannelId: String? = null
     private var appRef: Application? = null
@@ -303,6 +307,7 @@ object RadioManager {
     /** Lanza una sola vez: watchdog de conexión/audio, loop de nivel y armado de WebRTC. */
     private fun startBackgroundLoops(app: Application) {
         ui.launch {
+            var lastIncomingSyncAt = 0L
             while (started) {
                 delay(2000)
                 // "connected" (En vivo) = canal REALMENTE listo (socket + transportes de
@@ -317,6 +322,14 @@ object RadioManager {
                         runCatching { setupMediasoup() }
                         ui.launch { connected = isChannelReady() }
                     }
+                }
+                // No dependemos únicamente de ms:newProducer: si ese evento se perdió
+                // mientras Android suspendía el proceso, consultamos el productor activo
+                // y armamos la recepción sin obligar a cerrar y volver a abrir la app.
+                val now = android.os.SystemClock.uptimeMillis()
+                if (ready && socket.connected() && !talking && now - lastIncomingSyncAt >= 4000L) {
+                    lastIncomingSyncAt = now
+                    worker.execute { reconcileIncomingAudio() }
                 }
             }
         }
@@ -353,6 +366,23 @@ object RadioManager {
     private fun ensureSocketAlive() {
         if (!started) return
         runCatching { if (!socket.connected()) socket.connect() }
+    }
+
+    /** Resincroniza la recepción con el producer que el servidor mantiene activo. */
+    private fun reconcileIncomingAudio() {
+        if (!started || !socket.connected() || talking || consumingProducerId != null) return
+        val cid = channelId ?: return
+        val current = ack("ms:getProducer", JSONObject().put("channelId", cid), 1500) as? JSONObject ?: return
+        val producerId = current.optString("producerId").takeIf { it.isNotBlank() }
+        if (producerId == null) {
+            if (remoteProducerId != null || consumers.isNotEmpty()) closeConsumers()
+            return
+        }
+        if (consumers.isNotEmpty() && remoteProducerId == producerId) return
+        if (consumers.isNotEmpty()) closeConsumers()
+        val label = speakerAliasFrom(current)
+        android.util.Log.w(TAG, "Resincronizando recepción del hablante activo: $label")
+        consume(producerId, label)
     }
 
     /**
@@ -476,7 +506,27 @@ object RadioManager {
                         override fun onConnect(transport: Transport, dtlsParameters: String) {
                             ack("ms:connectTransport", JSONObject().put("direction", "recv").put("dtlsParameters", JSONObject(dtlsParameters)))
                         }
-                        override fun onConnectionStateChange(transport: Transport, connectionState: String) {}
+                        override fun onConnectionStateChange(transport: Transport, connectionState: String) {
+                            android.util.Log.w(TAG, "recvTransport state=$connectionState")
+                            if (connectionState == "failed") worker.execute {
+                                if (recvTransport !== transport || !started) return@execute
+                                val oldConsumers = consumers.values.toList()
+                                consumers.clear()
+                                consumingProducerId = null
+                                consuming = false
+                                oldConsumers.forEach { consumer ->
+                                    runCatching { socket.emit("ms:closeConsumer", JSONObject().put("consumerId", consumer.id)) }
+                                    runCatching { consumer.close() }
+                                }
+                                recvTransport = null
+                                setupDone = false
+                                lastSetupAttemptAt = 0L
+                                runCatching { transport.close() }
+                                android.util.Log.w(TAG, "Rearmando transporte de recepción que falló")
+                                runCatching { setupMediasoup() }
+                                ui.launch { connected = isChannelReady() }
+                            }
+                        }
                     },
                     recvInfo.getString("id"),
                     recvInfo.getJSONObject("iceParameters").toString(),
@@ -564,6 +614,7 @@ object RadioManager {
         if (consumingProducerId == producerId) return
         showRemoteSpeaker(producerId, speaker)
         consumingProducerId = producerId
+        var createdConsumer: Consumer? = null
         try {
             val recv = recvTransport ?: run { consumingProducerId = null; return }
             val dev = device ?: run { consumingProducerId = null; return }
@@ -575,14 +626,27 @@ object RadioManager {
             }
             val consumer = recv.consume(
                 object : Consumer.Listener {
-                    override fun onTransportClose(consumer: Consumer) {}
+                    override fun onTransportClose(consumer: Consumer) {
+                        worker.execute {
+                            if (consumers.remove(consumer.id) != null) {
+                                runCatching { socket.emit("ms:closeConsumer", JSONObject().put("consumerId", consumer.id)) }
+                                consuming = consumers.isNotEmpty()
+                                consumingProducerId = null
+                                if (consumers.isEmpty()) releaseAudioSession()
+                                android.util.Log.w(TAG, "Consumer cerrado por transporte; se resincronizará el canal")
+                            }
+                        }
+                    }
                 },
                 info.getString("id"),
                 info.getString("producerId"),
                 info.getString("kind"),
                 info.getJSONObject("rtpParameters").toString(),
             )
+            createdConsumer = consumer
             consumers[consumer.id] = consumer
+            lastInboundBytesReceived = -1L
+            lastInboundProgressAt = android.os.SystemClock.uptimeMillis()
             applyRemoteTrackVolume(consumer)
             // Selecciona la salida ANTES de abrir el consumer: al reanudarlo primero,
             // el primer fragmento podía salir por el teléfono mientras enlazaba BT.
@@ -600,13 +664,31 @@ object RadioManager {
                 releaseAudioSession()
                 return
             }
-            ack("ms:resume", JSONObject().put("consumerId", consumer.id))
+            val resumed = ack("ms:resume", JSONObject().put("consumerId", consumer.id), 2000) as? JSONObject
+            if (resumed?.optBoolean("resumed") != true) {
+                consumers.remove(consumer.id)
+                runCatching { consumer.close() }
+                runCatching { socket.emit("ms:closeConsumer", JSONObject().put("consumerId", consumer.id)) }
+                consuming = consumers.isNotEmpty()
+                consumingProducerId = null
+                if (consumers.isEmpty()) releaseAudioSession()
+                android.util.Log.w(TAG, "El servidor no reanudó el consumer; queda habilitado el reintento")
+                return
+            }
             ui.launch { speakerLabel = speaker }
         } catch (t: Throwable) {
             // No tumbar la app si falla crear/arrancar el consumer (p.ej. al entrar
-            // varios a la vez): la radio sigue viva y se reintenta en el próximo evento.
-            clearRemoteSpeaker(producerId)
+            // varios a la vez): liberar estado para que la resincronización reintente.
+            createdConsumer?.let { consumer ->
+                consumers.remove(consumer.id)
+                runCatching { socket.emit("ms:closeConsumer", JSONObject().put("consumerId", consumer.id)) }
+                runCatching { consumer.close() }
+            }
+            consuming = consumers.isNotEmpty()
             if (consumingProducerId == producerId) consumingProducerId = null
+            if (consumers.isEmpty()) releaseAudioSession()
+            android.util.Log.e(TAG, "No se pudo iniciar consumer de $speaker; se reintentará", t)
+            clearRemoteSpeaker(producerId)
         }
     }
 
@@ -1226,6 +1308,7 @@ object RadioManager {
                 }
                 // audioLevel de WebRTC es RMS (voz ≈ 0..0.3): lo amplificamos y suavizamos.
                 val raw = statsJson?.let { runCatching { parseAudioLevel(it) }.getOrNull() } ?: 0f
+                if (!talking && consuming && statsJson != null) monitorIncomingPackets(statsJson)
                 val target = (raw * 3.4f).coerceIn(0f, 1f)
                 audioLevel += (target - audioLevel) * 0.45f
                 if (!talking && (consuming || consumers.isNotEmpty())) {
@@ -1263,6 +1346,46 @@ object RadioManager {
             }
             if (level < 0) null else level.toFloat()
         }.getOrNull()
+    }
+
+    /** Si el producer sigue activo pero dejaron de entrar paquetes, rehace solo el consumer. */
+    private fun monitorIncomingPackets(statsJson: String) {
+        val producerId = remoteProducerId ?: return
+        val bytes = runCatching {
+            val arr = JSONArray(statsJson)
+            var received = -1L
+            for (i in 0 until arr.length()) {
+                val stat = arr.optJSONObject(i) ?: continue
+                val type = stat.optString("type")
+                if (type == "inbound-rtp" && (!stat.has("kind") || stat.optString("kind") == "audio")) {
+                    received = maxOf(received, stat.optLong("bytesReceived", -1L))
+                }
+            }
+            received.takeIf { it >= 0L }
+        }.getOrNull() ?: return
+        val now = android.os.SystemClock.uptimeMillis()
+        if (bytes > lastInboundBytesReceived) {
+            lastInboundBytesReceived = bytes
+            lastInboundProgressAt = now
+            return
+        }
+        if (now - lastInboundProgressAt < 9000L || now - lastConsumerRecoveryAt < 15000L) return
+        if (!consumerRecoveryInProgress.compareAndSet(false, true)) return
+        lastConsumerRecoveryAt = now
+        worker.execute {
+            try {
+                if (!started || remoteProducerId != producerId || !socket.connected()) return@execute
+                val current = ack("ms:getProducer", JSONObject().put("channelId", channelId), 1500) as? JSONObject
+                val active = current ?: return@execute
+                if (active.optString("producerId") != producerId) return@execute
+                val label = speakerAliasFrom(active)
+                android.util.Log.w(TAG, "Sin paquetes entrantes durante 9 s; reconstruyendo consumer de $label")
+                closeConsumers()
+                consume(producerId, label)
+            } finally {
+                consumerRecoveryInProgress.set(false)
+            }
+        }
     }
 
     private var audioCallback: android.media.AudioDeviceCallback? = null
