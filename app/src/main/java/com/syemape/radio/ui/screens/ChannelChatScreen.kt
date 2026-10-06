@@ -70,6 +70,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import androidx.compose.runtime.withFrameNanos
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.distinctUntilChanged
 import org.json.JSONObject
 
 private fun RadioTransmission.preview(): String = when {
@@ -268,32 +269,34 @@ fun ChannelChatScreen(channelId: String, title: String, topPadding: Dp, bottomPa
         }
         loadingOlder = true
         olderLoadFailed = false
-        val result = withContext(Dispatchers.IO) {
-            runCatching { Backend.api.radioHistory(requestChannel, CHANNEL_HISTORY_PAGE_SIZE, beforeId) }
-        }
-        if (requestChannel != channelId) return
-        val page = result.getOrNull()
-        if (page == null) {
-            olderLoadFailed = true
-            loadingOlder = false
-            return
-        }
-        val nextCursor = page.lastOrNull()?.id
-        // El cursor avanza con lo que devolvió el backend aunque haya ids duplicados
-        // en la lista local (por ejemplo, mensajes recibidos en vivo durante la carga).
-        // Solo detenemos la paginación si el servidor no avanzó o entregó una página corta.
-        hasMoreHistory = page.size >= CHANNEL_HISTORY_PAGE_SIZE && nextCursor != null && nextCursor != beforeId
-        if (nextCursor != null && nextCursor != beforeId) oldestHistoryCursor = nextCursor
-        val existingIds = items.mapTo(HashSet()) { it.id }
-        val older = page.asReversed().filterNot { it.id in existingIds }
-        if (older.isNotEmpty()) {
-            items.addAll(0, older)
-            withFrameNanos { }
-            anchor?.let { (id, offset) ->
-                rowIndexForTransmission(items, id)?.let { row -> listState.scrollToItem(row, -offset) }
+        try {
+            val page = withContext(Dispatchers.IO) {
+                Backend.api.radioHistory(requestChannel, CHANNEL_HISTORY_PAGE_SIZE, beforeId)
             }
+            if (requestChannel != channelId) return
+            val nextCursor = page.lastOrNull()?.id
+            // El cursor avanza con lo que devolvió el backend aunque haya ids duplicados
+            // en la lista local (p.ej., mensajes en vivo recibidos durante la carga).
+            val cursorAdvanced = nextCursor != null && nextCursor != beforeId
+            hasMoreHistory = page.size >= CHANNEL_HISTORY_PAGE_SIZE && cursorAdvanced
+            if (cursorAdvanced) oldestHistoryCursor = nextCursor
+            val existingIds = items.mapTo(HashSet()) { it.id }
+            val older = page.asReversed().filterNot { it.id in existingIds }
+            if (older.isNotEmpty()) {
+                items.addAll(0, older)
+                withFrameNanos { }
+                anchor?.let { (id, offset) ->
+                    rowIndexForTransmission(items, id)?.let { row -> listState.scrollToItem(row, -offset) }
+                }
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            if (requestChannel == channelId) olderLoadFailed = true
+        } finally {
+            // Siempre ocultar el spinner ante éxito, error, cancelación o cambio de canal.
+            loadingOlder = false
         }
-        loadingOlder = false
     }
 
     DisposableEffect(Unit) {
@@ -324,14 +327,10 @@ fun ChannelChatScreen(channelId: String, title: String, topPadding: Dp, bottomPa
     }
 
     LaunchedEffect(channelId) {
-        snapshotFlow {
-            Triple(
-                listState.firstVisibleItemIndex,
-                !initialLoading && hasMoreHistory && !loadingOlder && !olderLoadFailed,
-                items.size,
-            )
-        }.collect { (firstIndex, canLoad, count) ->
-            if (canLoad && count > 0 && firstIndex <= 1) loadOlderHistory()
+        snapshotFlow { listState.firstVisibleItemIndex }
+            .distinctUntilChanged()
+            .collect { firstIndex ->
+                if (!initialLoading && hasMoreHistory && !loadingOlder && firstIndex <= 1) loadOlderHistory()
         }
     }
 
