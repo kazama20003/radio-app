@@ -586,9 +586,20 @@ object RadioManager {
             applyRemoteTrackVolume(consumer)
             // Selecciona la salida ANTES de abrir el consumer: al reanudarlo primero,
             // el primer fragmento podía salir por el teléfono mientras enlazaba BT.
+            interruptVoiceNoteForRadio()
             consuming = true
             acquireAudioSession()
-            awaitSelectedCommunicationRoute()
+            if (!awaitSelectedCommunicationRoute()) {
+                android.util.Log.w(TAG, "Consumer pausado: no se confirmó la ruta de audio seleccionada")
+                consuming = false
+                consumers.remove(consumer.id)
+                runCatching { consumer.close() }
+                runCatching { socket.emit("ms:closeConsumer", JSONObject().put("consumerId", consumer.id)) }
+                consumingProducerId = null
+                clearRemoteSpeaker(producerId)
+                releaseAudioSession()
+                return
+            }
             ack("ms:resume", JSONObject().put("consumerId", consumer.id))
             ui.launch { speakerLabel = speaker }
         } catch (t: Throwable) {
@@ -800,6 +811,9 @@ object RadioManager {
             fun fail() {
                 pttStartInProgress.set(false)
                 channelId?.let { socket.emit("ms:releaseReservation", JSONObject().put("channelId", it)) }
+                runCatching { producer?.close() }
+                producer = null
+                runCatching { socket.emit("ms:closeProducer") }
                 runCatching { audioManager?.enabled = false }
                 ui.launch {
                     talking = false
@@ -814,9 +828,6 @@ object RadioManager {
                     pttStartInProgress.set(false)
                     return@execute
                 }
-                acquireAudioSession() // fija el dispositivo antes del chirrido
-                awaitSelectedCommunicationRoute()
-                beep(150) // feedback al pulsar PTT, sin esperar el ack del servidor
                 var reservation: JSONObject? = null
                 if (reservationsSupported != false) {
                     reservation = ack(
@@ -871,9 +882,17 @@ object RadioManager {
                 if (!talking) {
                     pttStartInProgress.set(false)
                     socket.emit("ms:releaseReservation", JSONObject().put("channelId", cid))
-                    releaseAudioSession()
                     return@execute
                 }
+                // Primero se confirma que este usuario ganó el turno. Un intento
+                // ocupado no abre el audio local, no suena ni toca la conexión.
+                interruptVoiceNoteForRadio()
+                acquireAudioSession()
+                if (!awaitSelectedCommunicationRoute()) {
+                    android.util.Log.w(TAG, "PTT cancelado: no se confirmó la salida de audio")
+                    return@execute fail()
+                }
+                beep(150)
                 runCatching { audioManager?.enabled = true } // micro en el MISMO hilo que produce
                 val send = sendTransport ?: return@execute fail()
                 val track = audioManager?.track ?: return@execute fail()
@@ -898,10 +917,12 @@ object RadioManager {
         RadioService.refresh(appRef) // notificación → "Hablar"
         worker.execute {
             runCatching { audioManager?.enabled = false } // silencia el micro en el worker
-            beep(120, waitUntilPlayed = true) // mantener activa la ruta hasta terminar el chirrido
+            val hadProducer = producer != null
+            if (hadProducer) beep(120, waitUntilPlayed = true) // solo pita si la reserva llegó a transmitir
             runCatching { producer?.close() }
             producer = null
-            runCatching { socket.emit("ms:closeProducer") }
+            if (hadProducer) runCatching { socket.emit("ms:closeProducer") }
+            else channelId?.let { runCatching { socket.emit("ms:releaseReservation", JSONObject().put("channelId", it)) } }
             releaseAudioSession() // terminé de hablar: libera el audio a otras apps
         }
     }
@@ -977,13 +998,40 @@ object RadioManager {
     // Antes sonaban por el stream de MEDIA (volumen multimedia del teléfono) y
     // se oían más bajas que la radio. Ahora usan el MISMO enrutado que la radio
     // (STREAM_VOICE_CALL + altavoz + volumen de la radio) para que suenen igual.
-    private var notePlayer: android.media.MediaPlayer? = null
-    private var notePlayingId: String? = null
+    @Volatile private var notePlayer: android.media.MediaPlayer? = null
+    @Volatile private var notePlayingId: String? = null
+    @Volatile private var noteStateCallback: ((String?) -> Unit)? = null
 
     /** Espera brevemente a que Android aplique la salida de comunicación seleccionada. */
-    private fun awaitSelectedCommunicationRoute() {
-        if (speakerOn || android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.S) return
-        val am = sysAudio ?: return
+    private fun awaitSelectedCommunicationRoute(): Boolean {
+        if (speakerOn) return true
+        val am = sysAudio ?: return false
+        if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.S) {
+            @Suppress("DEPRECATION")
+            val expectsSco = am.getDevices(AudioManager.GET_DEVICES_OUTPUTS).any {
+                it.type == android.media.AudioDeviceInfo.TYPE_BLUETOOTH_SCO ||
+                    it.type == android.media.AudioDeviceInfo.TYPE_BLUETOOTH_A2DP
+            }
+            if (!expectsSco) return true
+            val deadline = android.os.SystemClock.uptimeMillis() + 3500L
+            var stableSince = 0L
+            while (android.os.SystemClock.uptimeMillis() < deadline) {
+                @Suppress("DEPRECATION")
+                val scoReady = am.isBluetoothScoOn && am.getDevices(AudioManager.GET_DEVICES_OUTPUTS).any {
+                    it.type == android.media.AudioDeviceInfo.TYPE_BLUETOOTH_SCO
+                }
+                if (scoReady) {
+                    val now = android.os.SystemClock.uptimeMillis()
+                    if (stableSince == 0L) stableSince = now
+                    if (now - stableSince >= 250L) return true
+                } else stableSince = 0L
+                try { Thread.sleep(25) } catch (_: InterruptedException) {
+                    Thread.currentThread().interrupt()
+                    return false
+                }
+            }
+            return false
+        }
         val devices = am.availableCommunicationDevices
         val target = devices.firstOrNull {
             it.type == android.media.AudioDeviceInfo.TYPE_BLUETOOTH_SCO ||
@@ -994,11 +1042,25 @@ object RadioManager {
                 android.media.AudioDeviceInfo.TYPE_WIRED_HEADPHONES,
                 android.media.AudioDeviceInfo.TYPE_USB_HEADSET,
             )
-        } ?: return
-        repeat(50) {
-            if (am.communicationDevice?.id == target.id) return
-            try { Thread.sleep(20) } catch (_: InterruptedException) { return }
+            } ?: return true
+        val deadline = android.os.SystemClock.uptimeMillis() + 3500L
+        var stableSince = 0L
+        while (android.os.SystemClock.uptimeMillis() < deadline) {
+            val selected = am.communicationDevice?.id == target.id
+            val available = am.getDevices(AudioManager.GET_DEVICES_OUTPUTS).any { it.id == target.id }
+            if (selected && available) {
+                val now = android.os.SystemClock.uptimeMillis()
+                if (stableSince == 0L) stableSince = now
+                if (now - stableSince >= 250L) return true
+            } else {
+                stableSince = 0L
+            }
+            try { Thread.sleep(20) } catch (_: InterruptedException) {
+                Thread.currentThread().interrupt()
+                return false
+            }
         }
+        return false
     }
 
     /** Elige la salida Bluetooth/auricular para notas multimedia antes de iniciar el player. */
@@ -1059,6 +1121,11 @@ object RadioManager {
         onState: (String?) -> Unit,
     ) {
         if (notePlayingId == id) { stopVoiceNote(onState); return }
+        if (talking || consuming || remoteProducerId != null) {
+            ui.launch { onState(null) }
+            android.util.Log.i(TAG, "voice note deferred: radio audio has priority")
+            return
+        }
         stopVoiceNote { } // corta cualquier otra nota en curso
         val am = audioMgr()
         runCatching {
@@ -1075,13 +1142,6 @@ object RadioManager {
                 }
             }
             val mp = android.media.MediaPlayer()
-            if (!audioSessionActive && !talking && !consuming && !speakerOn && am != null) {
-                val target = preferredMediaOutput(am)
-                if (target != null) {
-                    val routed = runCatching { mp.setPreferredDevice(target) }.getOrDefault(false)
-                    android.util.Log.d(TAG, "voice note preferred output type=${target.type} selected=$routed")
-                }
-            }
             mp.setAudioAttributes(
                 android.media.AudioAttributes.Builder()
                     .setUsage(
@@ -1092,8 +1152,25 @@ object RadioManager {
                     .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SPEECH)
                     .build()
             )
+            if (!audioSessionActive && !talking && !consuming && !speakerOn && am != null) {
+                val target = preferredMediaOutput(am)
+                if (target != null) {
+                    val routed = runCatching { mp.setPreferredDevice(target) }.getOrDefault(false)
+                    android.util.Log.d(TAG, "voice note preferred output type=${target.type} selected=$routed")
+                }
+            }
             mp.setDataSource(url)
-            mp.setOnPreparedListener { it.start(); notePlayingId = id; ui.launch { onState(id) } }
+            notePlayer = mp
+            notePlayingId = id
+            noteStateCallback = onState
+            mp.setOnPreparedListener {
+                if (notePlayer !== it || talking || consuming || remoteProducerId != null) {
+                    runCatching { it.release() }
+                    return@setOnPreparedListener
+                }
+                it.start()
+                ui.launch { onState(id) }
+            }
             mp.setOnCompletionListener {
                 stopVoiceNote(onState)
                 onCompletion?.invoke()
@@ -1104,11 +1181,17 @@ object RadioManager {
                 true
             }
             mp.prepareAsync()
-            notePlayer = mp
         }.onFailure {
             stopVoiceNote(onState)
             onCompletion?.invoke()
         }
+    }
+
+    /** La radio en vivo/PTT tiene prioridad y nunca debe cambiar de salida con una nota sonando. */
+    private fun interruptVoiceNoteForRadio() {
+        val current = notePlayer ?: return
+        android.util.Log.i(TAG, "Deteniendo nota de voz para mantener estable la ruta de radio")
+        stopVoiceNote(noteStateCallback ?: {})
     }
 
     /** Detiene la nota de voz y libera la sesión cuando no hay otra voz de radio activa. */
@@ -1117,6 +1200,7 @@ object RadioManager {
         runCatching { notePlayer?.release() }
         notePlayer = null
         notePlayingId = null
+        noteStateCallback = null
         ui.launch { onState(null) }
         if (audioSessionActive || talking || consuming) releaseAudioSession()
     }
@@ -1218,10 +1302,6 @@ object RadioManager {
                 val earpiece = firstOf(android.media.AudioDeviceInfo.TYPE_BUILTIN_EARPIECE)
                 val speaker = firstOf(android.media.AudioDeviceInfo.TYPE_BUILTIN_SPEAKER)
                 val target = if (speakerOn) speaker else (bt ?: wired ?: earpiece ?: speaker)
-                // El enlace SCO del BT es asíncrono: limpiar antes de fijar ayuda a que
-                // el cambio "pegue". Si no, el primer setCommunicationDevice devuelve true
-                // pero el audio se queda en el auricular.
-                if (!speakerOn && bt != null) runCatching { am.clearCommunicationDevice() }
                 val setOk = target?.let { am.setCommunicationDevice(it) } ?: false
                 android.util.Log.d(
                     TAG,
@@ -1253,7 +1333,27 @@ object RadioManager {
                 ui.launch { normalDeviceLabel = label }
             } else {
                 @Suppress("DEPRECATION")
-                am.isSpeakerphoneOn = speakerOn
+                run {
+                    val outputs = am.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
+                    val hasBluetooth = outputs.any {
+                        it.type == android.media.AudioDeviceInfo.TYPE_BLUETOOTH_SCO ||
+                            it.type == android.media.AudioDeviceInfo.TYPE_BLUETOOTH_A2DP
+                    }
+                    if (speakerOn || !hasBluetooth) {
+                        if (am.isBluetoothScoOn) {
+                            am.isBluetoothScoOn = false
+                            am.stopBluetoothSco()
+                        }
+                        am.isSpeakerphoneOn = speakerOn
+                    } else {
+                        am.isSpeakerphoneOn = false
+                        if (!am.isBluetoothScoOn) {
+                            am.startBluetoothSco()
+                            am.isBluetoothScoOn = true
+                        }
+                    }
+                    android.util.Log.d(TAG, "legacy route speaker=$speakerOn btAvailable=$hasBluetooth scoOn=${am.isBluetoothScoOn}")
+                }
             }
             // WebRTC reproduce por STREAM_VOICE_CALL en MODE_IN_COMMUNICATION:
             // aplica el volumen elegido por el usuario (persistido).
@@ -1355,11 +1455,14 @@ object RadioManager {
     /** ¿Hay audífono por cable o Bluetooth conectado como salida de comunicación? */
     private fun isHeadsetConnected(): Boolean {
         val am = sysAudio ?: return false
-        if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.S) return false
         return runCatching {
-            am.availableCommunicationDevices.any { isHeadsetType(it.type) } ||
+            (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S &&
+                am.availableCommunicationDevices.any { isHeadsetType(it.type) }) ||
                 am.getDevices(AudioManager.GET_DEVICES_OUTPUTS).any {
+                    it.type == android.media.AudioDeviceInfo.TYPE_BLUETOOTH_SCO ||
                     it.type == android.media.AudioDeviceInfo.TYPE_BLUETOOTH_A2DP ||
+                        it.type == android.media.AudioDeviceInfo.TYPE_WIRED_HEADSET ||
+                        it.type == android.media.AudioDeviceInfo.TYPE_WIRED_HEADPHONES ||
                         it.type == android.media.AudioDeviceInfo.TYPE_BLE_HEADSET ||
                         it.type == android.media.AudioDeviceInfo.TYPE_BLE_SPEAKER
                 }
@@ -1384,6 +1487,11 @@ object RadioManager {
     private fun resetCommMode(am: AudioManager) {
         runCatching {
             if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) am.clearCommunicationDevice()
+            @Suppress("DEPRECATION")
+            if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.S && am.isBluetoothScoOn) {
+                am.isBluetoothScoOn = false
+                am.stopBluetoothSco()
+            }
             if (am.mode == AudioManager.MODE_IN_COMMUNICATION) am.mode = AudioManager.MODE_NORMAL
         }
     }
