@@ -131,6 +131,7 @@ fun ChannelChatScreen(channelId: String, title: String, topPadding: Dp, bottomPa
     var loadingOlder by remember(channelId) { mutableStateOf(false) }
     var olderLoadFailed by remember(channelId) { mutableStateOf(false) }
     var hasMoreHistory by remember(channelId) { mutableStateOf(true) }
+    var oldestHistoryCursor by remember(channelId) { mutableStateOf<String?>(null) }
 
     var uploading by remember { mutableStateOf(false) }
     var attachMenu by remember { mutableStateOf(false) }
@@ -236,6 +237,7 @@ fun ChannelChatScreen(channelId: String, title: String, topPadding: Dp, bottomPa
         initialLoading = true
         initialLoadFailed = false
         items.clear()
+        oldestHistoryCursor = null
         val page = try {
             withContext(Dispatchers.IO) { Backend.api.radioHistory(channelId, CHANNEL_HISTORY_PAGE_SIZE) }
         } catch (e: CancellationException) {
@@ -249,6 +251,7 @@ fun ChannelChatScreen(channelId: String, title: String, topPadding: Dp, bottomPa
         } else {
             items.addAll(page.reversed())
             hasMoreHistory = page.size >= CHANNEL_HISTORY_PAGE_SIZE
+            oldestHistoryCursor = page.lastOrNull()?.id
             withFrameNanos { }
             if (items.isNotEmpty()) listState.scrollToItem(listState.layoutInfo.totalItemsCount - 1)
         }
@@ -258,7 +261,7 @@ fun ChannelChatScreen(channelId: String, title: String, topPadding: Dp, bottomPa
     suspend fun loadOlderHistory() {
         if (initialLoading || loadingOlder || !hasMoreHistory || items.isEmpty()) return
         val requestChannel = channelId
-        val oldestId = items.first().id
+        val beforeId = oldestHistoryCursor ?: items.first().id
         val anchor = listState.layoutInfo.visibleItemsInfo.firstNotNullOfOrNull { info ->
             val id = info.key as? String
             if (id != null && items.any { it.id == id }) id to info.offset else null
@@ -266,7 +269,7 @@ fun ChannelChatScreen(channelId: String, title: String, topPadding: Dp, bottomPa
         loadingOlder = true
         olderLoadFailed = false
         val result = withContext(Dispatchers.IO) {
-            runCatching { Backend.api.radioHistory(requestChannel, CHANNEL_HISTORY_PAGE_SIZE, oldestId) }
+            runCatching { Backend.api.radioHistory(requestChannel, CHANNEL_HISTORY_PAGE_SIZE, beforeId) }
         }
         if (requestChannel != channelId) return
         val page = result.getOrNull()
@@ -275,10 +278,14 @@ fun ChannelChatScreen(channelId: String, title: String, topPadding: Dp, bottomPa
             loadingOlder = false
             return
         }
-        hasMoreHistory = page.size >= CHANNEL_HISTORY_PAGE_SIZE
+        val nextCursor = page.lastOrNull()?.id
+        // El cursor avanza con lo que devolvió el backend aunque haya ids duplicados
+        // en la lista local (por ejemplo, mensajes recibidos en vivo durante la carga).
+        // Solo detenemos la paginación si el servidor no avanzó o entregó una página corta.
+        hasMoreHistory = page.size >= CHANNEL_HISTORY_PAGE_SIZE && nextCursor != null && nextCursor != beforeId
+        if (nextCursor != null && nextCursor != beforeId) oldestHistoryCursor = nextCursor
         val existingIds = items.mapTo(HashSet()) { it.id }
         val older = page.asReversed().filterNot { it.id in existingIds }
-        if (older.isEmpty() && page.isNotEmpty()) hasMoreHistory = false
         if (older.isNotEmpty()) {
             items.addAll(0, older)
             withFrameNanos { }
@@ -435,13 +442,13 @@ fun ChannelChatScreen(channelId: String, title: String, topPadding: Dp, bottomPa
                     Text("No se cargó el historial. Toca para reintentar", color = MapeColors.TextMuted, fontFamily = Outfit)
                 }
             }
-            if (loadingOlder || olderLoadFailed) {
+            if (hasMoreHistory && items.isNotEmpty() || loadingOlder || olderLoadFailed) {
                 Row(
                     Modifier.align(Alignment.TopCenter)
                         .padding(top = 6.dp)
                         .clip(CircleShape)
                         .background(MapeColors.Card)
-                        .then(if (olderLoadFailed) Modifier.clickable { scope.launch { loadOlderHistory() } } else Modifier)
+                        .then(if (!loadingOlder) Modifier.clickable { scope.launch { loadOlderHistory() } } else Modifier)
                         .padding(horizontal = 14.dp, vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -450,8 +457,11 @@ fun ChannelChatScreen(channelId: String, title: String, topPadding: Dp, bottomPa
                         modifier = Modifier.size(16.dp), strokeWidth = 2.dp, color = MapeColors.Red,
                     )
                     Text(
-                        if (olderLoadFailed) "No se cargaron mensajes anteriores · toca para reintentar"
-                        else "Cargando mensajes anteriores…",
+                        when {
+                            loadingOlder -> "Cargando mensajes anteriores…"
+                            olderLoadFailed -> "No se cargaron mensajes anteriores · toca para reintentar"
+                            else -> "Toca para cargar mensajes anteriores"
+                        },
                         color = MapeColors.Text,
                         fontFamily = Outfit,
                         fontSize = 11.sp,
