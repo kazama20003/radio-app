@@ -47,6 +47,12 @@ object Fmt {
         DateTimeFormatter.ofPattern("HH:mm", Locale.forLanguageTag("es-PE")).format(it.atZone(zone))
     } ?: "--:--"
 
+    /** Fecha y hora local exacta para ubicar cuándo llegó la última posición. */
+    fun dateTime(iso: String?): String = instantOf(iso)?.let {
+        DateTimeFormatter.ofPattern("dd/MM/yyyy '·' HH:mm", Locale.forLanguageTag("es-PE"))
+            .format(it.atZone(zone))
+    } ?: ""
+
     /** Antigüedad relativa: "ahora", "hace 4 min", "hace 2 h". */
     fun hace(iso: String?): String {
         val inst = instantOf(iso) ?: return ""

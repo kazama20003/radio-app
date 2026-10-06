@@ -84,6 +84,7 @@ data class LiveUnit(
     val lastLng: Double? = null,
     val lastSpeedKmh: Double? = null,
     val lastHeading: Double? = null,
+    val lastPositionAt: String? = null,
     val operator: MiniUser? = null,
 )
 

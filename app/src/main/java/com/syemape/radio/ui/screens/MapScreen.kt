@@ -40,6 +40,7 @@ import androidx.compose.ui.unit.sp
 import com.google.android.gms.maps.model.LatLng
 import com.syemape.radio.data.Backend
 import com.syemape.radio.data.DirectionsResult
+import com.syemape.radio.data.Fmt
 import com.syemape.radio.data.LivePerson
 import com.syemape.radio.data.SessionManager
 import com.syemape.radio.ui.Avatar
@@ -489,6 +490,9 @@ private fun MapPreview(
                 com.google.maps.android.compose.Marker(
                     state = st,
                     title = u.code ?: "Unidad",
+                    snippet = u.recordedAt?.let { recordedAt ->
+                        Fmt.dateTime(recordedAt).takeIf { it.isNotBlank() }?.let { "Última ubicación · $it" }
+                    },
                     icon = com.google.android.gms.maps.model.BitmapDescriptorFactory.defaultMarker(
                         com.google.android.gms.maps.model.BitmapDescriptorFactory.HUE_ORANGE
                     ),
@@ -587,6 +591,19 @@ private fun PersonCard(p: LivePerson, isMe: Boolean, selected: Boolean, onSelect
                 if (hasLocation) "En vivo · $speed km/h" else "Sin ubicación todavía",
                 color = MapeColors.TextMuted, fontFamily = Outfit, fontSize = 12.sp,
             )
+            if (hasLocation) {
+                val lastUpdate = Fmt.dateTime(p.lastPositionAt)
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    Icon(MapeIcons.Clock, null, tint = MapeColors.TextFaint, modifier = Modifier.size(12.dp))
+                    Text(
+                        if (lastUpdate.isNotBlank()) "Última ubicación · $lastUpdate" else "Hora de ubicación no disponible",
+                        color = MapeColors.TextFaint, fontFamily = Outfit, fontSize = 10.sp, maxLines = 1,
+                    )
+                }
+            }
         }
         Box(
             Modifier.size(40.dp).clip(CircleShape).background(if (selected) MapeColors.Red else MapeColors.Bg).pressScale { onSelect() },

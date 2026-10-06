@@ -38,7 +38,9 @@ object TrackingManager {
         scope.launch {
             runCatching { Backend.api.livePeople() }.getOrNull()?.forEach { people[it.id] = it }
             runCatching { Backend.api.liveUnits() }.getOrNull()?.forEach { u ->
-                units[u.id] = UnitPosition(u.id, u.code, u.lastLat, u.lastLng, u.lastSpeedKmh, u.lastHeading, u.status, u.operator, null)
+                units[u.id] = UnitPosition(
+                    u.id, u.code, u.lastLat, u.lastLng, u.lastSpeedKmh, u.lastHeading, u.status, u.operator, u.lastPositionAt,
+                )
             }
         }
         val s = Realtime.socket("/tracking")
