@@ -665,33 +665,66 @@ object RadioManager {
                     .build()
                 if (track.state == android.media.AudioTrack.STATE_INITIALIZED) {
                     var preferredDeviceType: Int? = null
-                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
-                        val route = audioMgr()?.communicationDevice
-                        if (route != null) {
-                            preferredDeviceType = route.type
-                            val selected = runCatching { track.setPreferredDevice(route) }.getOrDefault(false)
-                            android.util.Log.i(TAG, "PTT chirp preferred device=${route.type} selected=$selected")
-                        }
+                    val am = audioMgr()
+                    val bluetoothTypes = intArrayOf(
+                        android.media.AudioDeviceInfo.TYPE_BLUETOOTH_SCO,
+                        android.media.AudioDeviceInfo.TYPE_BLUETOOTH_A2DP,
+                        android.media.AudioDeviceInfo.TYPE_BLE_HEADSET,
+                        android.media.AudioDeviceInfo.TYPE_BLE_SPEAKER,
+                    )
+                    val bluetoothOutput = am?.getDevices(AudioManager.GET_DEVICES_OUTPUTS)?.firstOrNull {
+                        it.type == android.media.AudioDeviceInfo.TYPE_BLUETOOTH_SCO ||
+                            it.type == android.media.AudioDeviceInfo.TYPE_BLUETOOTH_A2DP ||
+                            it.type == android.media.AudioDeviceInfo.TYPE_BLE_HEADSET ||
+                            it.type == android.media.AudioDeviceInfo.TYPE_BLE_SPEAKER
+                    }
+                    val btRoute = if (!speakerOn && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+                        am?.availableCommunicationDevices?.firstOrNull {
+                            it.type == android.media.AudioDeviceInfo.TYPE_BLUETOOTH_SCO ||
+                                it.type == android.media.AudioDeviceInfo.TYPE_BLE_HEADSET
+                        } ?: bluetoothOutput
+                    } else if (!speakerOn) {
+                        bluetoothOutput
+                    } else null
+                    val route = btRoute ?: if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+                        am?.communicationDevice
+                    } else null
+                    if (route != null) {
+                        preferredDeviceType = route.type
+                        val selected = runCatching { track.setPreferredDevice(route) }.getOrDefault(false)
+                        android.util.Log.i(TAG, "PTT chirp preferred device=${route.type} selected=$selected")
                     }
                     // El chirrido es muy agudo y a volumen completo puede lastimar
                     // en audífonos Bluetooth. Atenuar solo esa ruta; teléfono/altavoz
                     // conserva el nivel anterior.
-                    val bluetoothRoute = preferredDeviceType == android.media.AudioDeviceInfo.TYPE_BLUETOOTH_SCO ||
-                        preferredDeviceType == android.media.AudioDeviceInfo.TYPE_BLE_HEADSET ||
-                        preferredDeviceType == android.media.AudioDeviceInfo.TYPE_BLE_SPEAKER ||
+                    val bluetoothRoute = preferredDeviceType?.let { it in bluetoothTypes } == true ||
                         (preferredDeviceType == null && isBluetoothCommunicationRoute())
                     val chirpVolume = if (bluetoothRoute) 0.12f else 1.0f
                     track.setVolume(chirpVolume)
                     track.play()
-                    val written = track.write(pcm, 0, pcm.size, android.media.AudioTrack.WRITE_BLOCKING)
-                    if (written == pcm.size) {
-                        android.util.Log.i(TAG, "PTT chirp playing state=${track.state} device=$preferredDeviceType frames=$written volume=$chirpVolume")
-                        val deadline = android.os.SystemClock.uptimeMillis() + totalSamples * 1000L / sampleRate + 500L
-                        while (track.playbackHeadPosition < written && android.os.SystemClock.uptimeMillis() < deadline) {
-                            Thread.sleep(10)
-                        }
+                    // Confirma la ruta efectiva antes de escribir cualquier muestra:
+                    // durante el cambio a SCO/BLE algunos móviles reproducen el primer
+                    // bloque por el altavoz aunque Bluetooth ya aparezca seleccionado.
+                    val expectedBluetooth = !speakerOn && (btRoute != null || isBluetoothCommunicationRoute())
+                    val routeDeadline = android.os.SystemClock.uptimeMillis() + 1800L
+                    while (expectedBluetooth && track.routedDevice?.type?.let { it in bluetoothTypes } != true &&
+                        android.os.SystemClock.uptimeMillis() < routeDeadline) {
+                        Thread.sleep(20)
+                    }
+                    val actualRoute = track.routedDevice
+                    if (expectedBluetooth && actualRoute?.type?.let { it in bluetoothTypes } != true) {
+                        android.util.Log.w(TAG, "PTT chirp omitido: Bluetooth aún no es la ruta efectiva; actual=${actualRoute?.type}")
                     } else {
-                        android.util.Log.w(TAG, "No se pudo escribir el chirrido PTT: $written")
+                        val written = track.write(pcm, 0, pcm.size, android.media.AudioTrack.WRITE_BLOCKING)
+                        if (written == pcm.size) {
+                            android.util.Log.i(TAG, "PTT chirp playing state=${track.state} device=${actualRoute?.type ?: preferredDeviceType} frames=$written volume=$chirpVolume")
+                            val deadline = android.os.SystemClock.uptimeMillis() + totalSamples * 1000L / sampleRate + 500L
+                            while (track.playbackHeadPosition < written && android.os.SystemClock.uptimeMillis() < deadline) {
+                                Thread.sleep(10)
+                            }
+                        } else {
+                            android.util.Log.w(TAG, "No se pudo escribir el chirrido PTT: $written")
+                        }
                     }
                 } else {
                     android.util.Log.w(TAG, "AudioTrack no inicializado para chirrido PTT")
@@ -962,7 +995,7 @@ object RadioManager {
                 android.media.AudioDeviceInfo.TYPE_USB_HEADSET,
             )
         } ?: return
-        repeat(15) {
+        repeat(50) {
             if (am.communicationDevice?.id == target.id) return
             try { Thread.sleep(20) } catch (_: InterruptedException) { return }
         }

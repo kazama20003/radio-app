@@ -77,7 +77,11 @@ interface ApiService {
     suspend fun radioChannels(): List<RadioChannel>
 
     @GET("radio/channels/{id}/history")
-    suspend fun radioHistory(@Path("id") id: String, @retrofit2.http.Query("limit") limit: Int = 50): List<RadioTransmission>
+    suspend fun radioHistory(
+        @Path("id") id: String,
+        @retrofit2.http.Query("limit") limit: Int = 50,
+        @retrofit2.http.Query("before") before: String? = null,
+    ): List<RadioTransmission>
 
     @GET("conversations")
     suspend fun conversations(): List<Conversation>

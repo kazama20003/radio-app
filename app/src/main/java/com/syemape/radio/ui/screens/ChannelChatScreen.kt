@@ -6,6 +6,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -37,6 +38,7 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -63,8 +65,11 @@ import com.syemape.radio.ui.pressScale
 import com.syemape.radio.ui.theme.MapeColors
 import com.syemape.radio.ui.theme.Outfit
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import androidx.compose.runtime.withFrameNanos
+import kotlinx.coroutines.flow.collect
 import org.json.JSONObject
 
 private fun RadioTransmission.preview(): String = when {
@@ -78,6 +83,7 @@ private fun RadioTransmission.preview(): String = when {
 
 /** Origen del backend (sin /api) para construir URLs de archivos servidos. */
 private val mediaOrigin: String = BuildConfig.API_BASE_URL.substringBefore("/api")
+private const val CHANNEL_HISTORY_PAGE_SIZE = 50
 
 /** URL completa de un archivo a partir de su key (`/uploads/...`). */
 private fun urlOf(key: String?): String? = when {
@@ -96,14 +102,35 @@ private fun humanSize(bytes: Long?): String {
     return String.format("%.1f MB", mb)
 }
 
+/** Índice real de fila en LazyColumn, contando el separador de cada día. */
+private fun rowIndexForTransmission(messages: List<RadioTransmission>, targetId: String): Int? {
+    var row = 0
+    var previousDay: String? = null
+    for (message in messages) {
+        val day = Fmt.dayKey(message.createdAt)
+        if (day != previousDay) {
+            row++
+            previousDay = day
+        }
+        if (message.id == targetId) return row
+        row++
+    }
+    return null
+}
+
 @Composable
 fun ChannelChatScreen(channelId: String, title: String, topPadding: Dp, bottomPadding: Dp, onBack: () -> Unit) {
     val meId = SessionManager.user?.id
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val items = remember { mutableStateListOf<RadioTransmission>() }
+    val items = remember(channelId) { mutableStateListOf<RadioTransmission>() }
     var draft by remember { mutableStateOf("") }
     val listState = rememberLazyListState()
+    var initialLoading by remember(channelId) { mutableStateOf(true) }
+    var initialLoadFailed by remember(channelId) { mutableStateOf(false) }
+    var loadingOlder by remember(channelId) { mutableStateOf(false) }
+    var olderLoadFailed by remember(channelId) { mutableStateOf(false) }
+    var hasMoreHistory by remember(channelId) { mutableStateOf(true) }
 
     var uploading by remember { mutableStateOf(false) }
     var attachMenu by remember { mutableStateOf(false) }
@@ -204,6 +231,64 @@ fun ChannelChatScreen(channelId: String, title: String, topPadding: Dp, bottomPa
             },
         )
     }
+
+    suspend fun loadLatestHistory() {
+        initialLoading = true
+        initialLoadFailed = false
+        items.clear()
+        val page = try {
+            withContext(Dispatchers.IO) { Backend.api.radioHistory(channelId, CHANNEL_HISTORY_PAGE_SIZE) }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            null
+        }
+        if (page == null) {
+            initialLoadFailed = true
+            hasMoreHistory = false
+        } else {
+            items.addAll(page.reversed())
+            hasMoreHistory = page.size >= CHANNEL_HISTORY_PAGE_SIZE
+            withFrameNanos { }
+            if (items.isNotEmpty()) listState.scrollToItem(listState.layoutInfo.totalItemsCount - 1)
+        }
+        initialLoading = false
+    }
+
+    suspend fun loadOlderHistory() {
+        if (initialLoading || loadingOlder || !hasMoreHistory || items.isEmpty()) return
+        val requestChannel = channelId
+        val oldestId = items.first().id
+        val anchor = listState.layoutInfo.visibleItemsInfo.firstNotNullOfOrNull { info ->
+            val id = info.key as? String
+            if (id != null && items.any { it.id == id }) id to info.offset else null
+        }
+        loadingOlder = true
+        olderLoadFailed = false
+        val result = withContext(Dispatchers.IO) {
+            runCatching { Backend.api.radioHistory(requestChannel, CHANNEL_HISTORY_PAGE_SIZE, oldestId) }
+        }
+        if (requestChannel != channelId) return
+        val page = result.getOrNull()
+        if (page == null) {
+            olderLoadFailed = true
+            loadingOlder = false
+            return
+        }
+        hasMoreHistory = page.size >= CHANNEL_HISTORY_PAGE_SIZE
+        val existingIds = items.mapTo(HashSet()) { it.id }
+        val older = page.asReversed().filterNot { it.id in existingIds }
+        if (older.isEmpty() && page.isNotEmpty()) hasMoreHistory = false
+        if (older.isNotEmpty()) {
+            items.addAll(0, older)
+            withFrameNanos { }
+            anchor?.let { (id, offset) ->
+                rowIndexForTransmission(items, id)?.let { row -> listState.scrollToItem(row, -offset) }
+            }
+        }
+        loadingOlder = false
+    }
+
     DisposableEffect(Unit) {
         onDispose {
             playbackGeneration++
@@ -227,13 +312,21 @@ fun ChannelChatScreen(channelId: String, title: String, topPadding: Dp, bottomPa
     }
 
     LaunchedEffect(channelId) {
-        // El historial viene del más nuevo al más viejo: lo invertimos (orden cronológico).
-        runCatching { Backend.api.radioHistory(channelId) }.getOrNull()?.let {
-            items.clear(); items.addAll(it.reversed())
-            if (items.isNotEmpty()) listState.scrollToItem(items.size - 1) // ir al último
+        hasMoreHistory = true
+        loadLatestHistory()
+    }
+
+    LaunchedEffect(channelId) {
+        snapshotFlow {
+            Triple(
+                listState.firstVisibleItemIndex,
+                !initialLoading && hasMoreHistory && !loadingOlder && !olderLoadFailed,
+                items.size,
+            )
+        }.collect { (firstIndex, canLoad, count) ->
+            if (canLoad && count > 0 && firstIndex <= 1) loadOlderHistory()
         }
     }
-    LaunchedEffect(items.size) { if (items.isNotEmpty()) listState.animateScrollToItem(items.size - 1) }
 
     DisposableEffect(channelId) {
         val socket = Realtime.socket("/radio")
@@ -248,7 +341,19 @@ fun ChannelChatScreen(channelId: String, title: String, topPadding: Dp, bottomPa
             if (!o.has("transmission")) return@Listener // ptt:ended sin grabación: ignorar
             val t = runCatching { Realtime.gson.fromJson(o.getJSONObject("transmission").toString(), RadioTransmission::class.java) }.getOrNull()
                 ?: return@Listener
-            scope.launch(Dispatchers.Main) { if (items.none { it.id == t.id }) items.add(t) }
+            scope.launch(Dispatchers.Main) {
+                if (items.none { it.id == t.id }) {
+                    val layout = listState.layoutInfo
+                    val lastVisible = layout.visibleItemsInfo.lastOrNull()?.index
+                    val wasAtBottom = lastVisible == null || lastVisible >= layout.totalItemsCount - 2
+                    items.add(t)
+                    if (wasAtBottom) {
+                        withFrameNanos { }
+                        val last = listState.layoutInfo.totalItemsCount - 1
+                        if (last >= 0) listState.animateScrollToItem(last)
+                    }
+                }
+            }
         }
         socket.on("channel:post", addFromEvent) // texto / imagen / video / archivo
         socket.on("ptt:ended", addFromEvent)    // nota de voz grabada
@@ -281,12 +386,13 @@ fun ChannelChatScreen(channelId: String, title: String, topPadding: Dp, bottomPa
             }
         }
 
-        LazyColumn(
-            modifier = Modifier.weight(1f).fillMaxWidth(),
-            state = listState,
-            contentPadding = PaddingValues(16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
+        Box(Modifier.weight(1f).fillMaxWidth()) {
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                state = listState,
+                contentPadding = PaddingValues(16.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
             var previousDay: String? = null
             items.forEach { t ->
                 val day = Fmt.dayKey(t.createdAt)
@@ -314,6 +420,42 @@ fun ChannelChatScreen(channelId: String, title: String, topPadding: Dp, bottomPa
                         Text(Fmt.clockTime(t.createdAt), color = if (mine) MapeColors.TextOnDark else MapeColors.TextFaint, fontFamily = Outfit, fontSize = 10.sp, modifier = Modifier.padding(top = 3.dp).align(Alignment.End))
                     }
                 }
+                }
+            }
+            }
+            if (initialLoading && items.isEmpty()) {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    androidx.compose.material3.CircularProgressIndicator(color = MapeColors.Red)
+                }
+            } else if (initialLoadFailed && items.isEmpty()) {
+                Box(
+                    Modifier.fillMaxSize().clickable { scope.launch { loadLatestHistory() } },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text("No se cargó el historial. Toca para reintentar", color = MapeColors.TextMuted, fontFamily = Outfit)
+                }
+            }
+            if (loadingOlder || olderLoadFailed) {
+                Row(
+                    Modifier.align(Alignment.TopCenter)
+                        .padding(top = 6.dp)
+                        .clip(CircleShape)
+                        .background(MapeColors.Card)
+                        .then(if (olderLoadFailed) Modifier.clickable { scope.launch { loadOlderHistory() } } else Modifier)
+                        .padding(horizontal = 14.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    if (loadingOlder) androidx.compose.material3.CircularProgressIndicator(
+                        modifier = Modifier.size(16.dp), strokeWidth = 2.dp, color = MapeColors.Red,
+                    )
+                    Text(
+                        if (olderLoadFailed) "No se cargaron mensajes anteriores · toca para reintentar"
+                        else "Cargando mensajes anteriores…",
+                        color = MapeColors.Text,
+                        fontFamily = Outfit,
+                        fontSize = 11.sp,
+                    )
                 }
             }
         }
