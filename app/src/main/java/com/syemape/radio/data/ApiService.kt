@@ -76,6 +76,9 @@ interface ApiService {
     @GET("radio/channels")
     suspend fun radioChannels(): List<RadioChannel>
 
+    @POST("radio/channels")
+    suspend fun createRadioChannel(@Body body: CreateRadioChannelRequest): RadioChannel
+
     @GET("radio/channels/{id}/history")
     suspend fun radioHistory(
         @Path("id") id: String,

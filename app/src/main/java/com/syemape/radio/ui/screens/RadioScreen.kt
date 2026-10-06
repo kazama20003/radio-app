@@ -32,6 +32,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -39,6 +41,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -59,9 +63,13 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.syemape.radio.data.RadioManager
+import com.syemape.radio.data.Backend
+import com.syemape.radio.data.CreateRadioChannelRequest
+import com.syemape.radio.data.SessionManager
 import com.syemape.radio.ui.MapeIcons
 import com.syemape.radio.ui.pressScale
 import com.syemape.radio.ui.theme.Outfit
+import kotlinx.coroutines.launch
 
 private object RadioColors {
     val Bg = Color(0xFF090909)
@@ -82,6 +90,14 @@ fun RadioScreen(
     onOpenSettings: () -> Unit = {},
 ) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val isAdmin = SessionManager.user?.role.equals("ADMIN", ignoreCase = true)
+    var showCreateChannel by remember { mutableStateOf(false) }
+    var channelNameDraft by remember { mutableStateOf("") }
+    var channelDescriptionDraft by remember { mutableStateOf("") }
+    var channelType by remember { mutableStateOf("OPERACIONES") }
+    var creatingChannel by remember { mutableStateOf(false) }
+    var createChannelError by remember { mutableStateOf<String?>(null) }
     val app = context.applicationContext as android.app.Application
     val micLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
         androidx.activity.result.contract.ActivityResultContracts.RequestPermission(),
@@ -100,10 +116,11 @@ fun RadioScreen(
                 .padding(bottom = bottomPadding + 76.dp, top = 10.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            if (RadioManager.channels.isNotEmpty()) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Row(
-                    Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                    Modifier.weight(1f).horizontalScroll(rememberScrollState()),
                     horizontalArrangement = Arrangement.spacedBy(7.dp),
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
                     RadioManager.channels.forEach { channel ->
                         val selected = channel.id == RadioManager.channelId
@@ -123,6 +140,17 @@ fun RadioScreen(
                             )
                         }
                     }
+                    if (RadioManager.channels.isEmpty()) {
+                        Text("Sin canales disponibles", color = RadioColors.TextMuted, fontFamily = Outfit, fontSize = 12.sp)
+                    }
+                }
+                if (isAdmin) {
+                    Box(
+                        Modifier.size(34.dp).clip(CircleShape).background(RadioColors.Card)
+                            .border(1.dp, RadioColors.Border, CircleShape)
+                            .clickable { createChannelError = null; showCreateChannel = true },
+                        contentAlignment = Alignment.Center,
+                    ) { Icon(MapeIcons.Plus, contentDescription = "Crear canal", tint = RadioColors.Text, modifier = Modifier.size(18.dp)) }
                 }
             }
 
@@ -195,6 +223,71 @@ fun RadioScreen(
                 // pushing the microphone below the bottom navigation bar.
                 val micSize = minOf(maxWidth, maxHeight, 250.dp)
                 if (micSize > 0.dp) HoldTalkButton(size = micSize)
+            }
+        }
+    }
+
+    if (showCreateChannel && isAdmin) {
+        Dialog(onDismissRequest = { if (!creatingChannel) showCreateChannel = false }) {
+            Column(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(22.dp)).background(RadioColors.Card)
+                    .border(1.dp, RadioColors.Border, RoundedCornerShape(22.dp)).padding(20.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Text("Crear canal", color = RadioColors.Text, fontFamily = Outfit, fontWeight = FontWeight.Bold, fontSize = 20.sp)
+                Text("El canal estará disponible para los usuarios autorizados.", color = RadioColors.TextMuted, fontFamily = Outfit, fontSize = 13.sp)
+                OutlinedTextField(
+                    value = channelNameDraft, onValueChange = { channelNameDraft = it; createChannelError = null },
+                    modifier = Modifier.fillMaxWidth(), label = { Text("Nombre del canal") }, singleLine = true,
+                    colors = OutlinedTextFieldDefaults.colors(focusedTextColor = RadioColors.Text, unfocusedTextColor = RadioColors.Text,
+                        focusedLabelColor = RadioColors.Ink, unfocusedLabelColor = RadioColors.TextMuted,
+                        focusedBorderColor = RadioColors.Ink, unfocusedBorderColor = RadioColors.Border),
+                )
+                OutlinedTextField(
+                    value = channelDescriptionDraft, onValueChange = { channelDescriptionDraft = it },
+                    modifier = Modifier.fillMaxWidth(), label = { Text("Descripción (opcional)") }, singleLine = true,
+                    colors = OutlinedTextFieldDefaults.colors(focusedTextColor = RadioColors.Text, unfocusedTextColor = RadioColors.Text,
+                        focusedLabelColor = RadioColors.Ink, unfocusedLabelColor = RadioColors.TextMuted,
+                        focusedBorderColor = RadioColors.Ink, unfocusedBorderColor = RadioColors.Border),
+                )
+                Text("Tipo", color = RadioColors.TextMuted, fontFamily = Outfit, fontSize = 12.sp)
+                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                    listOf("OPERACIONES", "ZONA", "TALLER").forEach { type ->
+                        Box(Modifier.clip(CircleShape).background(if (channelType == type) RadioColors.Ink else RadioColors.Bg)
+                            .clickable { channelType = type }.padding(horizontal = 12.dp, vertical = 8.dp)) {
+                            Text(type.lowercase().replaceFirstChar { it.uppercase() }, color = if (channelType == type) RadioColors.White else RadioColors.Text,
+                                fontFamily = Outfit, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                        }
+                    }
+                }
+                createChannelError?.let { Text(it, color = Color(0xFFFF7777), fontFamily = Outfit, fontSize = 12.sp) }
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
+                    Text("Cancelar", Modifier.clickable(enabled = !creatingChannel) { showCreateChannel = false }.padding(12.dp),
+                        color = RadioColors.TextMuted, fontFamily = Outfit)
+                    Text(if (creatingChannel) "Creando…" else "Crear", Modifier.clip(CircleShape)
+                        .background(RadioColors.Ink).clickable(enabled = !creatingChannel) {
+                            val name = channelNameDraft.trim()
+                            if (name.isBlank()) { createChannelError = "Escribe el nombre del canal." }
+                            else {
+                                creatingChannel = true; createChannelError = null
+                                scope.launch {
+                                    try {
+                                        val created = Backend.api.createRadioChannel(CreateRadioChannelRequest(
+                                            name = name, type = channelType,
+                                            description = channelDescriptionDraft.trim().ifBlank { null },
+                                        ))
+                                        RadioManager.reloadChannels()
+                                        if (created.id.isNotBlank()) RadioManager.selectChannel(created.id)
+                                        channelNameDraft = ""; channelDescriptionDraft = ""; channelType = "OPERACIONES"
+                                        showCreateChannel = false
+                                    } catch (e: Exception) {
+                                        createChannelError = e.message?.takeIf { it.isNotBlank() } ?: "No se pudo crear el canal. Inténtalo de nuevo."
+                                    } finally { creatingChannel = false }
+                                }
+                            }
+                        }.padding(horizontal = 18.dp, vertical = 10.dp),
+                        color = RadioColors.White, fontFamily = Outfit, fontWeight = FontWeight.Bold)
+                }
             }
         }
     }

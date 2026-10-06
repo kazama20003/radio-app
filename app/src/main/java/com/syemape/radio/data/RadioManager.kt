@@ -408,6 +408,12 @@ object RadioManager {
     }
 
     /** Cambia de canal: UI instantánea; deja de oír el anterior y se une al nuevo en 2º plano. */
+    suspend fun reloadChannels(): List<RadioChannel> {
+        val latest = Backend.api.radioChannels()
+        channels = latest
+        return latest
+    }
+
     fun selectChannel(id: String) {
         if (id == channelId || id.isBlank()) return
         val prev = channelId

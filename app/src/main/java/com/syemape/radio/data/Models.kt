@@ -182,6 +182,12 @@ data class RadioChannel(
     val joined: Boolean = false,
 )
 
+data class CreateRadioChannelRequest(
+    val name: String,
+    val type: String = "OPERACIONES",
+    val description: String? = null,
+)
+
 /** Transmisión del chat de un canal de radio (voz, imagen o texto). */
 data class RadioTransmission(
     val id: String = "",
