@@ -1620,20 +1620,22 @@ object RadioManager {
     }
 
     /**
-     * Re-asienta modo de comunicación y volumen de llamada SIN re-seleccionar el
-     * dispositivo (evita glitches). El sistema resetea el modo a NORMAL entre
-     * transmisiones y eso baja el volumen; este watchdog lo mantiene.
+     * Mantiene el modo de voz mientras hay radio activa. No vuelve a imponer el
+     * nivel guardado cada 2 s: eso pisaba las teclas físicas de volumen durante
+     * una transmisión y hacía que la voz se oyera más fuerte de lo elegido.
      */
     private fun keepAudioAlive() {
         if (!audioSessionActive) return // en silencio no tocamos el audio del sistema
         val am = sysAudio ?: return
         runCatching {
-            if (am.mode != AudioManager.MODE_IN_COMMUNICATION) am.mode = AudioManager.MODE_IN_COMMUNICATION
-            val stream = AudioManager.STREAM_VOICE_CALL
-            val max = am.getStreamMaxVolume(stream)
-            val target = if (isBluetoothCommunicationRoute()) max
-                else Math.round(callVolume * max).coerceIn(0, max)
-            if (am.getStreamVolume(stream) != target) am.setStreamVolume(stream, target, 0)
+            val modeWasReset = am.mode != AudioManager.MODE_IN_COMMUNICATION
+            if (modeWasReset) {
+                am.mode = AudioManager.MODE_IN_COMMUNICATION
+                // Solo reponer el slider si Android había cambiado el modo entre
+                // transmisiones. Si el usuario baja/sube con botones mientras habla,
+                // conservar el nivel físico durante la sesión.
+                applyStreamVolume()
+            }
             val trackVolume = currentRemoteTrackVolume()
             consumers.values.forEach { applyRemoteTrackVolume(it, trackVolume) }
         }
