@@ -49,7 +49,7 @@ object Fmt {
 
     /** Fecha y hora local exacta para ubicar cuándo llegó la última posición. */
     fun dateTime(iso: String?): String = instantOf(iso)?.let {
-        DateTimeFormatter.ofPattern("dd/MM/yyyy '·' HH:mm", Locale.forLanguageTag("es-PE"))
+        DateTimeFormatter.ofPattern("dd/MM/yyyy '·' HH:mm:ss", Locale.forLanguageTag("es-PE"))
             .format(it.atZone(zone))
     } ?: ""
 

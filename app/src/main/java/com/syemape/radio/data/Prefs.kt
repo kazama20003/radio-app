@@ -29,7 +29,8 @@ object Prefs {
         set(v) { p?.edit()?.putBoolean("speakerOn", v)?.apply() }
 
     var darkMode: Boolean
-        get() = p?.getBoolean("darkMode", false) ?: false
+        // The main app screens follow Radio's dark monochrome appearance by default.
+        get() = p?.getBoolean("darkMode", true) ?: true
         set(v) { p?.edit()?.putBoolean("darkMode", v)?.apply() }
 
     /** Preferencia de sonido de radio; null significa que aún no se sincronizó con ajustes del backend. */

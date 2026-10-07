@@ -53,6 +53,7 @@ import com.syemape.radio.ui.pressScale
 import com.syemape.radio.ui.rememberAsync
 import com.syemape.radio.ui.theme.MapeColors
 import com.syemape.radio.ui.theme.Outfit
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /** Abre la navegación paso a paso en la app de mapas nativa (Google Maps). */
@@ -127,6 +128,30 @@ fun MapScreen(topPadding: Dp) {
     // Estado en vivo (socket + FusedLocation) desde TrackingManager.
     val people = com.syemape.radio.data.TrackingManager.people.values.toList()
     val units = com.syemape.radio.data.TrackingManager.units.values.toList()
+
+    // Socket.IO da actualizaciones inmediatas; este refresco recupera eventos perdidos
+    // y mantiene vigente el último punto mientras el mapa está abierto.
+    LaunchedEffect(Unit) {
+        while (true) {
+            runCatching { Backend.api.livePeople() }.getOrNull()?.forEach { person ->
+                if (person.id.isNotBlank()) com.syemape.radio.data.TrackingManager.people[person.id] = person
+            }
+            runCatching { Backend.api.liveUnits() }.getOrNull()?.forEach { unit ->
+                com.syemape.radio.data.TrackingManager.units[unit.id] = com.syemape.radio.data.UnitPosition(
+                    unitId = unit.id,
+                    code = unit.code,
+                    lat = unit.lastLat,
+                    lng = unit.lastLng,
+                    speedKmh = unit.lastSpeedKmh,
+                    heading = unit.lastHeading,
+                    status = unit.status,
+                    operator = unit.operator,
+                    recordedAt = unit.lastPositionAt,
+                )
+            }
+            delay(5_000)
+        }
+    }
 
     // ---- Estado de la ruta/navegación ----
     var routeFor by remember { mutableStateOf<String?>(null) } // id del destino con ruta activa
@@ -448,15 +473,14 @@ private fun MapPreview(
     }
 
     Box(
-        boxModifier.clip(RoundedCornerShape(28.dp)).background(
-            if (MapeColors.darkMode) Color(0xFF202020) else Color(0xFFE7ECE9),
-        ),
+        boxModifier.clip(RoundedCornerShape(28.dp)).background(Color(0xFFE7ECE9)),
     ) {
         com.google.maps.android.compose.GoogleMap(
             modifier = Modifier.fillMaxSize(),
             cameraPositionState = camera,
             properties = com.google.maps.android.compose.MapProperties(
-                mapStyleOptions = if (MapeColors.darkMode) darkMapStyleOptions() else null,
+                // Keep geographic tiles readable even when the rest of the app uses dark mode.
+                mapStyleOptions = null,
             ),
             uiSettings = com.google.maps.android.compose.MapUiSettings(zoomControlsEnabled = false, mapToolbarEnabled = false),
         ) {
@@ -597,11 +621,14 @@ private fun PersonCard(p: LivePerson, isMe: Boolean, selected: Boolean, onSelect
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
-                    Icon(MapeIcons.Clock, null, tint = MapeColors.TextFaint, modifier = Modifier.size(12.dp))
-                    Text(
-                        if (lastUpdate.isNotBlank()) "Última ubicación · $lastUpdate" else "Hora de ubicación no disponible",
-                        color = MapeColors.TextFaint, fontFamily = Outfit, fontSize = 10.sp, maxLines = 1,
-                    )
+                    Icon(MapeIcons.Clock, null, tint = MapeColors.TextFaint, modifier = Modifier.size(13.dp))
+                    Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
+                        Text("Última ubicación", color = MapeColors.TextFaint, fontFamily = Outfit, fontSize = 9.sp, maxLines = 1)
+                        Text(
+                            lastUpdate.ifBlank { "Fecha y hora no enviadas" },
+                            color = MapeColors.TextMuted, fontFamily = Outfit, fontSize = 10.sp, maxLines = 1,
+                        )
+                    }
                 }
             }
         }
