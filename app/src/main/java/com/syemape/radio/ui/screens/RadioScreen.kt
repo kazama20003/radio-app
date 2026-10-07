@@ -31,6 +31,7 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
@@ -62,6 +63,7 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -341,20 +343,14 @@ fun RadioScreen(
                         val checked = channel.id in RadioManager.parallelRadioChannelIds
                         Row(
                             Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
-                                .clickable {
-                                    val updated = if (checked) RadioManager.parallelRadioChannelIds - channel.id
-                                    else RadioManager.parallelRadioChannelIds + channel.id
-                                    RadioManager.setParallelRadioChannels(updated)
+                                .toggleable(value = checked, role = Role.Checkbox) {
+                                    RadioManager.setParallelRadioChannelEnabled(channel.id, !checked)
                                 }.padding(horizontal = 4.dp, vertical = 1.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Checkbox(
                                 checked = checked,
-                                onCheckedChange = { enabled ->
-                                    val updated = if (enabled) RadioManager.parallelRadioChannelIds + channel.id
-                                    else RadioManager.parallelRadioChannelIds - channel.id
-                                    RadioManager.setParallelRadioChannels(updated)
-                                },
+                                onCheckedChange = null,
                                 colors = CheckboxDefaults.colors(checkedColor = RadioColors.Ink, checkmarkColor = RadioColors.White),
                             )
                             Column(Modifier.weight(1f)) {

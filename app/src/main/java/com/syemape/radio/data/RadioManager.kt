@@ -486,6 +486,12 @@ object RadioManager {
         worker.execute { syncImportantSubscriptionOnWorker(channels) }
     }
 
+    fun setParallelRadioChannelEnabled(id: String, enabled: Boolean) {
+        if (channels.none { it.isImportant && it.id == id }) return
+        val updated = if (enabled) parallelRadioChannelIds + id else parallelRadioChannelIds - id
+        setParallelRadioChannels(updated)
+    }
+
     private fun syncImportantSubscriptionOnWorker(availableChannels: List<RadioChannel>) {
         if (!started || !socket.connected()) return
         val enabledImportantIds = availableChannels.filter { it.isImportant }.mapTo(mutableSetOf()) { it.id }
