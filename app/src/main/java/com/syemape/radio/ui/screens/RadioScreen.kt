@@ -152,14 +152,14 @@ fun RadioScreen(
                         Text("Sin canales disponibles", color = RadioColors.TextMuted, fontFamily = Outfit, fontSize = 12.sp)
                     }
                 }
-                if (RadioManager.channels.any { it.isImportant }) {
+                if (RadioManager.channels.size > 1) {
                     Box(
                         Modifier.size(34.dp).clip(CircleShape).background(RadioColors.Card)
                             .border(1.dp, RadioColors.Border, CircleShape)
                             .clickable { showParallelChannels = true },
                         contentAlignment = Alignment.Center,
                     ) {
-                        Icon(MapeIcons.Sliders, contentDescription = "Canales que escuchas", tint = RadioColors.Text, modifier = Modifier.size(17.dp))
+                        Icon(MapeIcons.Sliders, contentDescription = "Canales que escuchas en paralelo", tint = RadioColors.Text, modifier = Modifier.size(17.dp))
                     }
                 }
                 if (isAdmin) {
@@ -329,7 +329,7 @@ fun RadioScreen(
     }
 
     if (showParallelChannels) {
-        val importantChannels = RadioManager.channels.filter { it.isImportant }
+        val availableChannels = RadioManager.channels
         Dialog(onDismissRequest = { showParallelChannels = false }) {
             Column(
                 Modifier.fillMaxWidth().clip(RoundedCornerShape(22.dp)).background(RadioColors.Card)
@@ -337,9 +337,9 @@ fun RadioScreen(
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 Text("Canales que escuchas", color = RadioColors.Text, fontFamily = Outfit, fontWeight = FontWeight.Bold, fontSize = 19.sp)
-                Text("Elige qué canales importantes se oyen junto al canal seleccionado.", color = RadioColors.TextMuted, fontFamily = Outfit, fontSize = 12.sp)
+                Text("El canal actual siempre se escucha. Marca otros canales para oírlos a la vez.", color = RadioColors.TextMuted, fontFamily = Outfit, fontSize = 12.sp)
                 LazyColumn(Modifier.fillMaxWidth().heightIn(max = 360.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    items(importantChannels, key = { it.id }) { channel ->
+                    items(availableChannels, key = { it.id }) { channel ->
                         val checked = channel.id in RadioManager.parallelRadioChannelIds
                         Row(
                             Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
@@ -354,7 +354,10 @@ fun RadioScreen(
                                 colors = CheckboxDefaults.colors(checkedColor = RadioColors.Ink, checkmarkColor = RadioColors.White),
                             )
                             Column(Modifier.weight(1f)) {
-                                Text(channel.name ?: "Canal", color = RadioColors.Text, fontFamily = Outfit, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                                Text(
+                                    (if (channel.isImportant) "★ " else "") + (channel.name ?: "Canal"),
+                                    color = RadioColors.Text, fontFamily = Outfit, fontWeight = FontWeight.SemiBold, fontSize = 13.sp,
+                                )
                                 channel.description?.takeIf { it.isNotBlank() }?.let {
                                     Text(it, color = RadioColors.TextMuted, fontFamily = Outfit, fontSize = 11.sp, maxLines = 1)
                                 }

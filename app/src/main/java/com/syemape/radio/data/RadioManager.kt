@@ -479,24 +479,27 @@ object RadioManager {
     }
 
     fun setParallelRadioChannels(ids: Set<String>) {
-        val importantIds = channels.filter { it.isImportant }.mapTo(mutableSetOf()) { it.id }
-        val selected = ids intersect importantIds
+        val availableIds = channels.mapTo(mutableSetOf()) { it.id }
+        val selected = ids intersect availableIds
         Prefs.parallelRadioChannelIds = selected
         parallelRadioChannelIds = selected
         worker.execute { syncImportantSubscriptionOnWorker(channels) }
     }
 
     fun setParallelRadioChannelEnabled(id: String, enabled: Boolean) {
-        if (channels.none { it.isImportant && it.id == id }) return
+        if (channels.none { it.id == id }) return
         val updated = if (enabled) parallelRadioChannelIds + id else parallelRadioChannelIds - id
         setParallelRadioChannels(updated)
     }
 
     private fun syncImportantSubscriptionOnWorker(availableChannels: List<RadioChannel>) {
         if (!started || !socket.connected()) return
-        val enabledImportantIds = availableChannels.filter { it.isImportant }.mapTo(mutableSetOf()) { it.id }
-        val requestedIds = Prefs.parallelRadioChannelIds ?: enabledImportantIds
-        val selectedIds = requestedIds intersect enabledImportantIds
+        // First install defaults to the admin-designated channels; after that the
+        // user can independently include any active channel in parallel listening.
+        val defaultChannelIds = availableChannels.filter { it.isImportant }.mapTo(mutableSetOf()) { it.id }
+        val availableChannelIds = availableChannels.mapTo(mutableSetOf()) { it.id }
+        val requestedIds = Prefs.parallelRadioChannelIds ?: defaultChannelIds
+        val selectedIds = requestedIds intersect availableChannelIds
         parallelRadioChannelIds = selectedIds
         val desired = availableChannels.filter {
             it.isImportant && it.id != channelId && it.id in selectedIds
