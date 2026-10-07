@@ -22,11 +22,13 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -95,6 +97,7 @@ fun RadioScreen(
     val scope = rememberCoroutineScope()
     val isAdmin = SessionManager.user?.role.equals("ADMIN", ignoreCase = true)
     var showCreateChannel by remember { mutableStateOf(false) }
+    var showParallelChannels by remember { mutableStateOf(false) }
     var channelNameDraft by remember { mutableStateOf("") }
     var channelDescriptionDraft by remember { mutableStateOf("") }
     var channelType by remember { mutableStateOf("OPERACIONES") }
@@ -145,6 +148,16 @@ fun RadioScreen(
                     }
                     if (RadioManager.channels.isEmpty()) {
                         Text("Sin canales disponibles", color = RadioColors.TextMuted, fontFamily = Outfit, fontSize = 12.sp)
+                    }
+                }
+                if (RadioManager.channels.any { it.isImportant }) {
+                    Box(
+                        Modifier.size(34.dp).clip(CircleShape).background(RadioColors.Card)
+                            .border(1.dp, RadioColors.Border, CircleShape)
+                            .clickable { showParallelChannels = true },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(MapeIcons.Sliders, contentDescription = "Canales que escuchas", tint = RadioColors.Text, modifier = Modifier.size(17.dp))
                     }
                 }
                 if (isAdmin) {
@@ -308,6 +321,58 @@ fun RadioScreen(
                             }
                         }.padding(horizontal = 18.dp, vertical = 10.dp),
                         color = RadioColors.White, fontFamily = Outfit, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+    }
+
+    if (showParallelChannels) {
+        val importantChannels = RadioManager.channels.filter { it.isImportant }
+        Dialog(onDismissRequest = { showParallelChannels = false }) {
+            Column(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(22.dp)).background(RadioColors.Card)
+                    .border(1.dp, RadioColors.Border, RoundedCornerShape(22.dp)).padding(20.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Text("Canales que escuchas", color = RadioColors.Text, fontFamily = Outfit, fontWeight = FontWeight.Bold, fontSize = 19.sp)
+                Text("Elige qué canales importantes se oyen junto al canal seleccionado.", color = RadioColors.TextMuted, fontFamily = Outfit, fontSize = 12.sp)
+                LazyColumn(Modifier.fillMaxWidth().heightIn(max = 360.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    items(importantChannels, key = { it.id }) { channel ->
+                        val checked = channel.id in RadioManager.parallelRadioChannelIds
+                        Row(
+                            Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
+                                .clickable {
+                                    val updated = if (checked) RadioManager.parallelRadioChannelIds - channel.id
+                                    else RadioManager.parallelRadioChannelIds + channel.id
+                                    RadioManager.setParallelRadioChannels(updated)
+                                }.padding(horizontal = 4.dp, vertical = 1.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Checkbox(
+                                checked = checked,
+                                onCheckedChange = { enabled ->
+                                    val updated = if (enabled) RadioManager.parallelRadioChannelIds + channel.id
+                                    else RadioManager.parallelRadioChannelIds - channel.id
+                                    RadioManager.setParallelRadioChannels(updated)
+                                },
+                                colors = CheckboxDefaults.colors(checkedColor = RadioColors.Ink, checkmarkColor = RadioColors.White),
+                            )
+                            Column(Modifier.weight(1f)) {
+                                Text(channel.name ?: "Canal", color = RadioColors.Text, fontFamily = Outfit, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                                channel.description?.takeIf { it.isNotBlank() }?.let {
+                                    Text(it, color = RadioColors.TextMuted, fontFamily = Outfit, fontSize = 11.sp, maxLines = 1)
+                                }
+                            }
+                        }
+                    }
+                }
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                    Text(
+                        "Listo",
+                        Modifier.clip(CircleShape).background(RadioColors.Ink).clickable { showParallelChannels = false }
+                            .padding(horizontal = 18.dp, vertical = 10.dp),
+                        color = RadioColors.White, fontFamily = Outfit, fontWeight = FontWeight.Bold,
+                    )
                 }
             }
         }

@@ -58,6 +58,7 @@ object RadioManager {
     var callVolume by mutableStateOf(1f); private set        // volumen de la radio 0..1
     var txFailed by mutableStateOf(false); private set
     var channels by mutableStateOf<List<RadioChannel>>(emptyList()); private set
+    var parallelRadioChannelIds by mutableStateOf<Set<String>>(emptySet()); private set
     var normalDeviceLabel by mutableStateOf("Teléfono"); private set
     var audioLevel by mutableStateOf(0f); private set        // nivel de voz 0..1 (mueve la onda)
     var lastVoiceNote by mutableStateOf<RadioTransmission?>(null); private set // última nota de voz del canal
@@ -477,9 +478,23 @@ object RadioManager {
         return latest
     }
 
+    fun setParallelRadioChannels(ids: Set<String>) {
+        val importantIds = channels.filter { it.isImportant }.mapTo(mutableSetOf()) { it.id }
+        val selected = ids intersect importantIds
+        Prefs.parallelRadioChannelIds = selected
+        parallelRadioChannelIds = selected
+        worker.execute { syncImportantSubscriptionOnWorker(channels) }
+    }
+
     private fun syncImportantSubscriptionOnWorker(availableChannels: List<RadioChannel>) {
         if (!started || !socket.connected()) return
-        val desired = availableChannels.filter { it.isImportant && it.id != channelId }.associateBy { it.id }
+        val enabledImportantIds = availableChannels.filter { it.isImportant }.mapTo(mutableSetOf()) { it.id }
+        val requestedIds = Prefs.parallelRadioChannelIds ?: enabledImportantIds
+        val selectedIds = requestedIds intersect enabledImportantIds
+        parallelRadioChannelIds = selectedIds
+        val desired = availableChannels.filter {
+            it.isImportant && it.id != channelId && it.id in selectedIds
+        }.associateBy { it.id }
         val current = importantChannelIds
         (current - desired.keys).forEach { removed ->
             runCatching { socket.emit("channel:unlisten-important", JSONObject().put("channelId", removed)) }

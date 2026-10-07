@@ -24,6 +24,20 @@ object Prefs {
         get() = p?.getString("lastChannelName", null)
         set(v) { p?.edit()?.putString("lastChannelName", v)?.apply() }
 
+    /** Canales importantes que este usuario quiere oír junto al canal seleccionado.
+     * null conserva el comportamiento predeterminado: escuchar todos los importantes.
+     */
+    var parallelRadioChannelIds: Set<String>?
+        get() = if (p?.contains("parallelRadioChannelIds") == true) {
+            p?.getStringSet("parallelRadioChannelIds", emptySet())?.toSet() ?: emptySet()
+        } else null
+        set(v) {
+            val editor = p?.edit() ?: return
+            if (v == null) editor.remove("parallelRadioChannelIds")
+            else editor.putStringSet("parallelRadioChannelIds", v.toSet())
+            editor.apply()
+        }
+
     var speakerOn: Boolean
         get() = p?.getBoolean("speakerOn", true) ?: true
         set(v) { p?.edit()?.putBoolean("speakerOn", v)?.apply() }
