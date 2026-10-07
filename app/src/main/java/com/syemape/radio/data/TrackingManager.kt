@@ -11,6 +11,7 @@ import com.google.android.gms.location.LocationRequest
 import com.google.android.gms.location.LocationResult
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
+import com.syemape.radio.LocationTrackingService
 import io.socket.emitter.Emitter
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -29,12 +30,14 @@ object TrackingManager {
     private var fused: FusedLocationProviderClient? = null
     private var locationCb: LocationCallback? = null
     private var started = false
+    private var appContext: Context? = null
     private var presenceListener: Emitter.Listener? = null
     private var positionListener: Emitter.Listener? = null
 
     fun start(context: Context) {
         if (started) return
         started = true
+        appContext = context.applicationContext
         scope.launch {
             runCatching { Backend.api.livePeople() }.getOrNull()?.forEach { people[it.id] = it }
             runCatching { Backend.api.liveUnits() }.getOrNull()?.forEach { u ->
@@ -62,6 +65,13 @@ object TrackingManager {
 
     @SuppressLint("MissingPermission")
     fun startLocationUpdates(context: Context) {
+        if (!hasLocationPermission(context)) return
+        LocationTrackingService.start(context.applicationContext)
+    }
+
+    /** Called by LocationTrackingService only after Android has promoted it to foreground. */
+    @SuppressLint("MissingPermission")
+    fun startLocationUpdatesFromService(context: Context) {
         if (!hasLocationPermission(context) || locationCb != null) return
         val client = fused ?: LocationServices.getFusedLocationProviderClient(context).also { fused = it }
         val req = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 5000L)
@@ -89,9 +99,14 @@ object TrackingManager {
         runCatching { client.requestLocationUpdates(req, cb, Looper.getMainLooper()) }
     }
 
-    fun stop() {
-        locationCb?.let { cb -> fused?.removeLocationUpdates(cb) }
+    fun stopLocationUpdatesFromService() {
+        locationCb?.let { callback -> fused?.removeLocationUpdates(callback) }
         locationCb = null
+    }
+
+    fun stop() {
+        stopLocationUpdatesFromService()
+        appContext?.let { LocationTrackingService.stop(it) }
         runCatching {
             val s = Realtime.socket("/tracking")
             presenceListener?.let { s.off("presence:update", it) }
@@ -99,5 +114,6 @@ object TrackingManager {
         }
         people.clear(); units.clear()
         started = false
+        appContext = null
     }
 }
