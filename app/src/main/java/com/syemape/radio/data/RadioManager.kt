@@ -86,11 +86,14 @@ object RadioManager {
     private val consumingProducerIds = ConcurrentHashMap.newKeySet<String>()
     var channelId: String? = null; private set
     @Volatile private var remoteProducerId: String? = null
-    @Volatile private var importantChannelId: String? = null
-    @Volatile private var importantChannelName: String? = null
-    @Volatile private var importantProducerId: String? = null
+    @Volatile private var importantChannelIds: Set<String> = emptySet()
+    private val importantChannelNames = ConcurrentHashMap<String, String>()
+    private val importantProducerIds = ConcurrentHashMap<String, String>()
     @Volatile private var primarySpeakerAlias: String? = null
-    @Volatile private var importantSpeakerAlias: String? = null
+    private val importantSpeakerAliases = ConcurrentHashMap<String, String>()
+    private fun importantSpeakingLabel(): String? = importantProducerIds.keys.firstNotNullOfOrNull { id ->
+        importantSpeakerAliases[id]?.let { "${importantChannelNames[id] ?: "Prioritario"} · $it" }
+    }
     @Volatile private var lastInboundBytesReceived = -1L
     @Volatile private var lastInboundProgressAt = 0L
     @Volatile private var lastConsumerRecoveryAt = 0L
@@ -205,8 +208,8 @@ object RadioManager {
                     showRemoteSpeaker(producerId, label)
                     worker.execute { consume(producerId, label, eventChannel) }
                 }
-                eventChannel == importantChannelId -> {
-                    importantProducerId = producerId
+                eventChannel in importantChannelIds -> {
+                    importantProducerIds[eventChannel] = producerId
                     worker.execute {
                         consume(producerId, label, eventChannel, fromImportantChannel = true)
                     }
@@ -222,10 +225,11 @@ object RadioManager {
             val o = args.firstOrNull() as? JSONObject ?: return@Listener
             val producerId = o.optString("producerId")
             val eventChannel = o.optString("channelId")
-            val channelMatches = eventChannel == channelId || eventChannel == importantChannelId ||
+            val channelMatches = eventChannel == channelId || eventChannel in importantChannelIds ||
                 (eventChannel.isBlank() && (openChatChannelId == null || openChatChannelId == channelId))
             if (channelMatches) {
-                if (eventChannel == importantChannelId) importantProducerId = null
+                importantProducerIds.remove(eventChannel)
+                importantSpeakerAliases.remove(eventChannel)
                 if (eventChannel == channelId) remoteProducerId = null
                 worker.execute {
                     if (producerId.isNotBlank()) closeConsumersForProducer(producerId)
@@ -238,18 +242,18 @@ object RadioManager {
             val o = args.firstOrNull() as? JSONObject ?: return@Listener
             val eventChannel = o.optString("channelId")
             val primaryEvent = eventChannel == channelId
-            val importantEvent = eventChannel == importantChannelId
+            val importantEvent = eventChannel in importantChannelIds
             if (!primaryEvent && !importantEvent) return@Listener
             val sender = o.optJSONObject("transmission")?.optJSONObject("sender")
             val endedSpeaker = sender?.optString("nickname")?.takeIf { it.isNotBlank() && it != "null" }
                 ?: sender?.optString("name")?.takeIf { it.isNotBlank() && it != "null" }
             ui.launch {
-                (if (importantEvent) "${importantChannelName ?: "Prioritario"} · ${endedSpeaker ?: speakerLabel ?: ""}" else endedSpeaker ?: speakerLabel)
+                (if (importantEvent) "${importantChannelNames[eventChannel] ?: "Prioritario"} · ${endedSpeaker ?: speakerLabel ?: ""}" else endedSpeaker ?: speakerLabel)
                     ?.takeIf { it.isNotBlank() }?.let { lastSpeakerLabel = it }
                 remoteSpeaking = false
                 speakerLabel = when {
                     importantEvent && remoteProducerId != null -> primarySpeakerAlias
-                    primaryEvent && importantProducerId != null -> "${importantChannelName ?: "Prioritario"} · ${importantSpeakerAlias ?: "Alguien"}"
+                    primaryEvent && importantProducerIds.isNotEmpty() -> importantSpeakingLabel()
                     else -> null
                 }
                 RadioService.refresh(appRef)
@@ -270,8 +274,10 @@ object RadioManager {
                 runCatching { producer?.close() }; producer = null
                 runCatching { sendTransport?.close() }; sendTransport = null
                 runCatching { recvTransport?.close() }; recvTransport = null
-                importantChannelId = null
-                importantProducerId = null
+                importantChannelIds = emptySet()
+                importantChannelNames.clear()
+                importantProducerIds.clear()
+                importantSpeakerAliases.clear()
                 ui.launch { talking = false }
                 channelId?.let { socket.emit("channel:join", it) }
                 runCatching { setupMediasoup() } // rearma transportes tras reconectar
@@ -425,15 +431,18 @@ object RadioManager {
             consume(producerId, label, cid)
         }
 
-        val important = importantChannelId ?: return
-        val priority = ack("ms:getProducer", JSONObject().put("channelId", important), 1500) as? JSONObject ?: return
-        val priorityId = priority.optString("producerId").takeIf { it.isNotBlank() }
-        if (priorityId == null) {
-            if (importantProducerId != null || hasConsumerForChannel(important)) closeConsumersForChannel(important)
-        } else if (!hasConsumerForChannel(important) || importantProducerId != priorityId) {
-            closeConsumersForChannel(important)
-            importantProducerId = priorityId
-            consume(priorityId, speakerAliasFrom(priority), important, fromImportantChannel = true)
+        importantChannelIds.forEach { important ->
+            val priority = ack("ms:getProducer", JSONObject().put("channelId", important), 1500) as? JSONObject ?: return@forEach
+            val priorityId = priority.optString("producerId").takeIf { it.isNotBlank() }
+            if (priorityId == null) {
+                importantProducerIds.remove(important)
+                importantSpeakerAliases.remove(important)
+                if (hasConsumerForChannel(important)) closeConsumersForChannel(important)
+            } else if (!hasConsumerForChannel(important) || importantProducerIds[important] != priorityId) {
+                closeConsumersForChannel(important)
+                importantProducerIds[important] = priorityId
+                consume(priorityId, speakerAliasFrom(priority), important, fromImportantChannel = true)
+            }
         }
     }
 
@@ -470,45 +479,46 @@ object RadioManager {
 
     private fun syncImportantSubscriptionOnWorker(availableChannels: List<RadioChannel>) {
         if (!started || !socket.connected()) return
-        val next = availableChannels.firstOrNull { it.isImportant && it.id != channelId }
-        val nextId = next?.id
-        if (importantChannelId == nextId) {
-            if (next != null && recvTransport != null && !hasConsumerForChannel(next.id)) {
-                val current = ack("ms:getProducer", JSONObject().put("channelId", next.id), 1500) as? JSONObject
-                val producerId = current?.optString("producerId")?.takeIf { it.isNotBlank() }
+        val desired = availableChannels.filter { it.isImportant && it.id != channelId }.associateBy { it.id }
+        val current = importantChannelIds
+        (current - desired.keys).forEach { removed ->
+            runCatching { socket.emit("channel:unlisten-important", JSONObject().put("channelId", removed)) }
+            closeConsumersForChannel(removed)
+            importantChannelNames.remove(removed)
+            importantProducerIds.remove(removed)
+            importantSpeakerAliases.remove(removed)
+        }
+        if (recvTransport == null || device == null) {
+            importantChannelIds = current intersect desired.keys
+            return
+        }
+        val active = (current intersect desired.keys).toMutableSet()
+        desired.forEach { (id, channel) ->
+            importantChannelNames[id] = channel.name ?: "Prioritario"
+            if (id !in active) {
+                val response = ack("channel:listen-important", JSONObject().put("channelId", id), 1800) as? JSONObject
+                if (response?.optBoolean("joined") != true) {
+                    android.util.Log.w(TAG, "No se pudo activar la escucha del canal importante $id: ${response?.optString("error")}")
+                    return@forEach
+                }
+                active += id
+                val speaking = response.optJSONObject("speaking")
+                val live = speaking ?: (ack("ms:getProducer", JSONObject().put("channelId", id), 1500) as? JSONObject)
+                val producerId = live?.optString("producerId")?.takeIf { it.isNotBlank() }
                 if (producerId != null) {
-                    importantProducerId = producerId
-                    consume(producerId, current?.let { speakerAliasFrom(it) } ?: "Alguien", next.id, fromImportantChannel = true)
+                    importantProducerIds[id] = producerId
+                    consume(producerId, live?.let { speakerAliasFrom(it) } ?: "Alguien", id, fromImportantChannel = true)
+                }
+            } else if (!hasConsumerForChannel(id)) {
+                val live = ack("ms:getProducer", JSONObject().put("channelId", id), 1500) as? JSONObject
+                val producerId = live?.optString("producerId")?.takeIf { it.isNotBlank() }
+                if (producerId != null) {
+                    importantProducerIds[id] = producerId
+                    consume(producerId, speakerAliasFrom(live ?: JSONObject()), id, fromImportantChannel = true)
                 }
             }
-            return
         }
-
-        val previous = importantChannelId
-        if (previous != null) {
-            runCatching { socket.emit("channel:unlisten-important", JSONObject()) }
-            closeConsumersForChannel(previous)
-            importantChannelId = null
-            importantProducerId = null
-        }
-        if (next == null || recvTransport == null || device == null) return
-
-        val response = ack(
-            "channel:listen-important",
-            JSONObject().put("channelId", next.id),
-            1800,
-        ) as? JSONObject ?: return
-        if (!response.optBoolean("joined")) {
-            android.util.Log.w(TAG, "No se pudo activar la escucha del canal importante: ${response.optString("error")}")
-            return
-        }
-        importantChannelId = next.id
-        importantChannelName = next.name ?: "Prioritario"
-        val speaking = response.optJSONObject("speaking")
-        val live = speaking ?: (ack("ms:getProducer", JSONObject().put("channelId", next.id), 1500) as? JSONObject)
-        val producerId = live?.optString("producerId")?.takeIf { it.isNotBlank() } ?: return
-        importantProducerId = producerId
-        consume(producerId, live?.let { speakerAliasFrom(it) } ?: "Alguien", next.id, fromImportantChannel = true)
+        importantChannelIds = active
     }
 
     fun selectChannel(id: String) {
@@ -529,7 +539,7 @@ object RadioManager {
         remoteProducerId = null
         primarySpeakerAlias = null
         talking = false; remoteSpeaking = false
-        speakerLabel = if (importantProducerId != null) "${importantChannelName ?: "Prioritario"} · ${importantSpeakerAlias ?: "Alguien"}" else null
+        speakerLabel = importantSpeakingLabel()
         lastSpeakerLabel = null; txFailed = false
         lastVoiceNote = null // la nota es por-canal; se recarga la del canal nuevo
         RadioService.update(appRef, channelName)
@@ -622,9 +632,9 @@ object RadioManager {
                                 consumerChannelIds.clear()
                                 consumingProducerIds.clear()
                                 remoteProducerId = null
-                                importantProducerId = null
+                                importantProducerIds.clear()
                                 primarySpeakerAlias = null
-                                importantSpeakerAlias = null
+                                importantSpeakerAliases.clear()
                                 consuming = false
                                 oldConsumers.forEach { consumer ->
                                     runCatching { socket.emit("ms:closeConsumer", JSONObject().put("consumerId", consumer.id)) }
@@ -636,10 +646,8 @@ object RadioManager {
                                 runCatching { transport.close() }
                                 android.util.Log.w(TAG, "Rearmando transporte de recepción que falló")
                                 runCatching { setupMediasoup() }
-                                if (importantChannelId != null) {
-                                    importantChannelId = null
-                                    syncImportantSubscriptionOnWorker(channels)
-                                }
+                                importantChannelIds = emptySet()
+                                syncImportantSubscriptionOnWorker(channels)
                                 ui.launch { connected = isChannelReady() }
                             }
                         }
@@ -697,29 +705,30 @@ object RadioManager {
     }
 
     /** Publica de inmediato el estado del hablante, sin esperar a crear el consumer. */
-    private fun showRemoteSpeaker(producerId: String, label: String, fromImportantChannel: Boolean = false) {
+    private fun showRemoteSpeaker(producerId: String, label: String, fromImportantChannel: Boolean = false, sourceChannelId: String = channelId.orEmpty()) {
         if (fromImportantChannel) {
-            importantProducerId = producerId
-            importantSpeakerAlias = label
+            importantProducerIds[sourceChannelId] = producerId
+            importantSpeakerAliases[sourceChannelId] = label
         } else {
             remoteProducerId = producerId
             primarySpeakerAlias = label
         }
         ui.launch {
-            speakerLabel = if (fromImportantChannel) "${importantChannelName ?: "Prioritario"} · $label" else label
+            speakerLabel = if (fromImportantChannel) "${importantChannelNames[sourceChannelId] ?: "Prioritario"} · $label" else label
             RadioService.refresh(appRef)
         }
     }
 
     private fun clearRemoteSpeaker(producerId: String) {
         val wasPrimary = remoteProducerId == producerId
-        val wasImportant = importantProducerId == producerId
+        val importantId = importantProducerIds.entries.firstOrNull { it.value == producerId }?.key
+        val wasImportant = importantId != null
         if (!wasPrimary && !wasImportant) return
         if (wasPrimary) { remoteProducerId = null; primarySpeakerAlias = null }
-        if (wasImportant) { importantProducerId = null; importantSpeakerAlias = null }
+        if (importantId != null) { importantProducerIds.remove(importantId); importantSpeakerAliases.remove(importantId) }
         ui.launch {
-            if (importantProducerId != null) {
-                speakerLabel = "${importantChannelName ?: "Prioritario"} · ${importantSpeakerAlias ?: "Alguien"}"
+            if (importantProducerIds.isNotEmpty()) {
+                speakerLabel = importantSpeakingLabel()
             } else if (remoteProducerId != null) {
                 speakerLabel = primarySpeakerAlias
             } else {
@@ -746,7 +755,7 @@ object RadioManager {
         fromImportantChannel: Boolean = false,
     ) {
         if (!consumingProducerIds.add(producerId)) return
-        showRemoteSpeaker(producerId, speaker, fromImportantChannel)
+        showRemoteSpeaker(producerId, speaker, fromImportantChannel, sourceChannelId)
         var createdConsumer: Consumer? = null
         try {
             val recv = recvTransport ?: run { consumingProducerIds.remove(producerId); return }
@@ -816,7 +825,7 @@ object RadioManager {
                 android.util.Log.w(TAG, "El servidor no reanudó el consumer; queda habilitado el reintento")
                 return
             }
-            ui.launch { speakerLabel = if (fromImportantChannel) "${importantChannelName ?: "Prioritario"} · $speaker" else speaker }
+            ui.launch { speakerLabel = if (fromImportantChannel) "${importantChannelNames[sourceChannelId] ?: "Prioritario"} · $speaker" else speaker }
         } catch (t: Throwable) {
             // No tumbar la app si falla crear/arrancar el consumer (p.ej. al entrar
             // varios a la vez): liberar estado para que la resincronización reintente.
@@ -844,9 +853,9 @@ object RadioManager {
         consumerChannelIds.clear()
         consumingProducerIds.clear()
         remoteProducerId = null
-        importantProducerId = null
+        importantProducerIds.clear()
         primarySpeakerAlias = null
-        importantSpeakerAlias = null
+        importantSpeakerAliases.clear()
         snapshot.forEach { runCatching { it.close() } }
         consuming = false
         releaseAudioSession() // dejé de recibir: libera el audio si tampoco estoy hablando
@@ -869,7 +878,9 @@ object RadioManager {
             runCatching { consumer.close() }
         }
         if (remoteProducerId == producerId) { remoteProducerId = null; primarySpeakerAlias = null }
-        if (importantProducerId == producerId) { importantProducerId = null; importantSpeakerAlias = null }
+        importantProducerIds.entries.firstOrNull { it.value == producerId }?.key?.let { id ->
+            importantProducerIds.remove(id); importantSpeakerAliases.remove(id)
+        }
         finishClosingConsumers()
     }
 
@@ -884,7 +895,9 @@ object RadioManager {
             runCatching { consumer.close() }
         }
         if (sourceChannelId == channelId) { remoteProducerId = null; primarySpeakerAlias = null }
-        if (sourceChannelId == importantChannelId) { importantProducerId = null; importantSpeakerAlias = null }
+        if (sourceChannelId in importantChannelIds) {
+            importantProducerIds.remove(sourceChannelId); importantSpeakerAliases.remove(sourceChannelId)
+        }
         finishClosingConsumers()
     }
 
@@ -893,7 +906,7 @@ object RadioManager {
         if (consumers.isEmpty()) releaseAudioSession()
         ui.launch {
             speakerLabel = when {
-                importantProducerId != null -> "${importantChannelName ?: "Prioritario"} · ${importantSpeakerAlias ?: "Alguien"}"
+                importantProducerIds.isNotEmpty() -> importantSpeakingLabel()
                 remoteProducerId != null -> primarySpeakerAlias
                 else -> {
                     speakerLabel?.let { lastSpeakerLabel = it }
@@ -1059,7 +1072,7 @@ object RadioManager {
             pttStartInProgress.set(false)
             return
         }
-        if (remoteSpeaking || remoteProducerId != null || importantProducerId != null) {
+        if (remoteSpeaking || remoteProducerId != null || importantProducerIds.isNotEmpty()) {
             pttStartInProgress.set(false)
             val who = speakerLabel ?: "Alguien"
             appRef?.let { android.widget.Toast.makeText(it, "$who está hablando", android.widget.Toast.LENGTH_SHORT).show() }
@@ -1401,7 +1414,7 @@ object RadioManager {
         onState: (String?) -> Unit,
     ) {
         if (notePlayingId == id) { stopVoiceNote(onState); return }
-        if (talking || consuming || remoteProducerId != null || importantProducerId != null) {
+        if (talking || consuming || remoteProducerId != null || importantProducerIds.isNotEmpty()) {
             ui.launch { onState(null) }
             android.util.Log.i(TAG, "voice note deferred: radio audio has priority")
             return
@@ -1444,7 +1457,7 @@ object RadioManager {
             notePlayingId = id
             noteStateCallback = onState
             mp.setOnPreparedListener {
-                if (notePlayer !== it || talking || consuming || remoteProducerId != null || importantProducerId != null) {
+                if (notePlayer !== it || talking || consuming || remoteProducerId != null || importantProducerIds.isNotEmpty()) {
                     runCatching { it.release() }
                     return@setOnPreparedListener
                 }
@@ -1869,7 +1882,10 @@ object RadioManager {
             runCatching { device?.dispose() }; device = null
             runCatching { radioSocket.emit("channel:unlisten-important", JSONObject()) }
             channelId?.let { radioSocket.emit("channel:leave", it) }
-            importantChannelId = null
+            importantChannelIds = emptySet()
+            importantChannelNames.clear()
+            importantProducerIds.clear()
+            importantSpeakerAliases.clear()
             radioSocket.off("ms:newProducer"); radioSocket.off("ms:producerClosed")
             radioSocket.off("channel:important-changed")
             radioConnectListener?.let { radioSocket.off("connect", it) }
