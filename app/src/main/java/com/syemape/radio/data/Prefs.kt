@@ -28,13 +28,13 @@ object Prefs {
      * null conserva el comportamiento predeterminado: escuchar todos los importantes.
      */
     var parallelRadioChannelIds: Set<String>?
-        get() = if (p?.contains("parallelRadioChannelIds") == true) {
-            p?.getStringSet("parallelRadioChannelIds", emptySet())?.toSet() ?: emptySet()
+        get() = if (p?.contains("parallelRadioChannelIdsV2") == true) {
+            p?.getStringSet("parallelRadioChannelIdsV2", emptySet())?.toSet() ?: emptySet()
         } else null
         set(v) {
             val editor = p?.edit() ?: return
-            if (v == null) editor.remove("parallelRadioChannelIds")
-            else editor.putStringSet("parallelRadioChannelIds", v.toSet())
+            if (v == null) editor.remove("parallelRadioChannelIdsV2")
+            else editor.putStringSet("parallelRadioChannelIdsV2", v.toSet())
             editor.apply()
         }
 

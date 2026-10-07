@@ -494,11 +494,10 @@ object RadioManager {
 
     private fun syncImportantSubscriptionOnWorker(availableChannels: List<RadioChannel>) {
         if (!started || !socket.connected()) return
-        // First install defaults to the admin-designated channels; after that the
-        // user can independently include any active channel in parallel listening.
-        val defaultChannelIds = availableChannels.filter { it.isImportant }.mapTo(mutableSetOf()) { it.id }
+        // Start with every active channel selected; users can then turn each one
+        // off independently. Versioned preference avoids carrying the old one-channel selection.
         val availableChannelIds = availableChannels.mapTo(mutableSetOf()) { it.id }
-        val requestedIds = Prefs.parallelRadioChannelIds ?: defaultChannelIds
+        val requestedIds = Prefs.parallelRadioChannelIds ?: availableChannelIds
         val selectedIds = requestedIds intersect availableChannelIds
         parallelRadioChannelIds = selectedIds
         val desired = availableChannels.filter {
