@@ -32,6 +32,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
@@ -96,6 +98,7 @@ fun RadioScreen(
     var channelNameDraft by remember { mutableStateOf("") }
     var channelDescriptionDraft by remember { mutableStateOf("") }
     var channelType by remember { mutableStateOf("OPERACIONES") }
+    var channelImportant by remember { mutableStateOf(false) }
     var creatingChannel by remember { mutableStateOf(false) }
     var createChannelError by remember { mutableStateOf<String?>(null) }
     val app = context.applicationContext as android.app.Application
@@ -132,7 +135,7 @@ fun RadioScreen(
                                 .padding(horizontal = 14.dp, vertical = 7.dp),
                         ) {
                             Text(
-                                channel.name ?: "Canal",
+                                (if (channel.isImportant) "★ " else "") + (channel.name ?: "Canal"),
                                 color = if (selected) RadioColors.White else RadioColors.Text,
                                 fontFamily = Outfit,
                                 fontWeight = FontWeight.SemiBold,
@@ -260,6 +263,21 @@ fun RadioScreen(
                         }
                     }
                 }
+                Row(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
+                        .clickable { channelImportant = !channelImportant }.padding(horizontal = 4.dp, vertical = 2.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Checkbox(
+                        checked = channelImportant,
+                        onCheckedChange = { channelImportant = it },
+                        colors = CheckboxDefaults.colors(checkedColor = RadioColors.Ink, checkmarkColor = RadioColors.White),
+                    )
+                    Column(Modifier.weight(1f)) {
+                        Text("Canal importante", color = RadioColors.Text, fontFamily = Outfit, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                        Text("Se escuchará junto al canal seleccionado", color = RadioColors.TextMuted, fontFamily = Outfit, fontSize = 11.sp)
+                    }
+                }
                 createChannelError?.let { Text(it, color = Color(0xFFFF7777), fontFamily = Outfit, fontSize = 12.sp) }
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
                     Text("Cancelar", Modifier.clickable(enabled = !creatingChannel) { showCreateChannel = false }.padding(12.dp),
@@ -275,10 +293,13 @@ fun RadioScreen(
                                         val created = Backend.api.createRadioChannel(CreateRadioChannelRequest(
                                             name = name, type = channelType,
                                             description = channelDescriptionDraft.trim().ifBlank { null },
+                                            isImportant = channelImportant,
                                         ))
                                         RadioManager.reloadChannels()
-                                        if (created.id.isNotBlank()) RadioManager.selectChannel(created.id)
-                                        channelNameDraft = ""; channelDescriptionDraft = ""; channelType = "OPERACIONES"
+                                        if (created.id.isNotBlank() && (!created.isImportant || RadioManager.channelId == null)) {
+                                            RadioManager.selectChannel(created.id)
+                                        }
+                                        channelNameDraft = ""; channelDescriptionDraft = ""; channelType = "OPERACIONES"; channelImportant = false
                                         showCreateChannel = false
                                     } catch (e: Exception) {
                                         createChannelError = e.message?.takeIf { it.isNotBlank() } ?: "No se pudo crear el canal. Inténtalo de nuevo."

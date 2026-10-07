@@ -81,9 +81,16 @@ object RadioManager {
     private var recvTransport: RecvTransport? = null
     private var producer: Producer? = null
     private val consumers = ConcurrentHashMap<String, Consumer>()
+    private val consumerProducerIds = ConcurrentHashMap<String, String>()
+    private val consumerChannelIds = ConcurrentHashMap<String, String>()
+    private val consumingProducerIds = ConcurrentHashMap.newKeySet<String>()
     var channelId: String? = null; private set
     @Volatile private var remoteProducerId: String? = null
-    @Volatile private var consumingProducerId: String? = null
+    @Volatile private var importantChannelId: String? = null
+    @Volatile private var importantChannelName: String? = null
+    @Volatile private var importantProducerId: String? = null
+    @Volatile private var primarySpeakerAlias: String? = null
+    @Volatile private var importantSpeakerAlias: String? = null
     @Volatile private var lastInboundBytesReceived = -1L
     @Volatile private var lastInboundProgressAt = 0L
     @Volatile private var lastConsumerRecoveryAt = 0L
@@ -154,6 +161,7 @@ object RadioManager {
         radioConnectListener?.let { socket.off("connect", it) }
         radioDisconnectListener?.let { socket.off("disconnect", it) }
         socket.off("ms:newProducer"); socket.off("ms:producerClosed"); socket.off("channel:presence")
+        socket.off("channel:important-changed")
         socket.on("channel:presence", Emitter.Listener { args ->
             val o = args.firstOrNull() as? JSONObject ?: return@Listener
             if (o.optString("channelId") == channelId) {
@@ -179,44 +187,74 @@ object RadioManager {
                 ui.launch { members = count; if (list != null) connectedUsers = list }
             }
         })
+        socket.on("channel:important-changed", Emitter.Listener {
+            ui.launch {
+                val latest = runCatching { Backend.api.radioChannels() }.getOrNull() ?: return@launch
+                channels = latest
+                worker.execute { syncImportantSubscriptionOnWorker(latest) }
+            }
+        })
         socket.on("ms:newProducer", Emitter.Listener { args ->
             val o = args.firstOrNull() as? JSONObject ?: return@Listener
-            // El mismo socket también entra temporalmente a salas desde el chat del canal.
-            // Nunca consumas audio que no pertenezca al canal sintonizado.
             val eventChannel = o.optString("channelId")
-            if (eventChannel.isNotBlank() && eventChannel != channelId) return@Listener
-            if (eventChannel.isBlank() && openChatChannelId != null && openChatChannelId != channelId) return@Listener
             val producerId = o.optString("producerId", "")
             val label = speakerAliasFrom(o)
-            if (producerId.isNotEmpty()) {
-                showRemoteSpeaker(producerId, label)
-                worker.execute { consume(producerId, label) }
+            when {
+                producerId.isBlank() -> return@Listener
+                eventChannel == channelId -> {
+                    showRemoteSpeaker(producerId, label)
+                    worker.execute { consume(producerId, label, eventChannel) }
+                }
+                eventChannel == importantChannelId -> {
+                    importantProducerId = producerId
+                    worker.execute {
+                        consume(producerId, label, eventChannel, fromImportantChannel = true)
+                    }
+                }
+                // Backwards compatibility for older servers that omit channelId.
+                eventChannel.isBlank() && (openChatChannelId == null || openChatChannelId == channelId) -> {
+                    showRemoteSpeaker(producerId, label)
+                    worker.execute { consume(producerId, label, channelId.orEmpty()) }
+                }
             }
         })
         socket.on("ms:producerClosed", Emitter.Listener { args ->
             val o = args.firstOrNull() as? JSONObject ?: return@Listener
             val producerId = o.optString("producerId")
             val eventChannel = o.optString("channelId")
-            val channelMatches = eventChannel == channelId ||
+            val channelMatches = eventChannel == channelId || eventChannel == importantChannelId ||
                 (eventChannel.isBlank() && (openChatChannelId == null || openChatChannelId == channelId))
-            if (channelMatches && remoteProducerId != null && (producerId.isBlank() || producerId == remoteProducerId)) {
-                remoteProducerId = null
-                worker.execute { closeConsumers() }
+            if (channelMatches) {
+                if (eventChannel == importantChannelId) importantProducerId = null
+                if (eventChannel == channelId) remoteProducerId = null
+                worker.execute {
+                    if (producerId.isNotBlank()) closeConsumersForProducer(producerId)
+                    else closeConsumersForChannel(eventChannel.ifBlank { channelId.orEmpty() })
+                }
             }
         })
         // Última nota de voz grabada en el canal (para el botón de "escuchar última nota").
         socket.on("ptt:ended", Emitter.Listener { args ->
             val o = args.firstOrNull() as? JSONObject ?: return@Listener
-            if (o.optString("channelId") != channelId) return@Listener
+            val eventChannel = o.optString("channelId")
+            val primaryEvent = eventChannel == channelId
+            val importantEvent = eventChannel == importantChannelId
+            if (!primaryEvent && !importantEvent) return@Listener
             val sender = o.optJSONObject("transmission")?.optJSONObject("sender")
             val endedSpeaker = sender?.optString("nickname")?.takeIf { it.isNotBlank() && it != "null" }
                 ?: sender?.optString("name")?.takeIf { it.isNotBlank() && it != "null" }
             ui.launch {
-                (endedSpeaker ?: speakerLabel)?.let { lastSpeakerLabel = it }
+                (if (importantEvent) "${importantChannelName ?: "Prioritario"} · ${endedSpeaker ?: speakerLabel ?: ""}" else endedSpeaker ?: speakerLabel)
+                    ?.takeIf { it.isNotBlank() }?.let { lastSpeakerLabel = it }
                 remoteSpeaking = false
-                speakerLabel = null
+                speakerLabel = when {
+                    importantEvent && remoteProducerId != null -> primarySpeakerAlias
+                    primaryEvent && importantProducerId != null -> "${importantChannelName ?: "Prioritario"} · ${importantSpeakerAlias ?: "Alguien"}"
+                    else -> null
+                }
                 RadioService.refresh(appRef)
             }
+            if (!primaryEvent) return@Listener
             if (!o.has("transmission")) return@Listener
             val t = runCatching { Realtime.gson.fromJson(o.getJSONObject("transmission").toString(), RadioTransmission::class.java) }.getOrNull()
                 ?: return@Listener
@@ -232,9 +270,12 @@ object RadioManager {
                 runCatching { producer?.close() }; producer = null
                 runCatching { sendTransport?.close() }; sendTransport = null
                 runCatching { recvTransport?.close() }; recvTransport = null
+                importantChannelId = null
+                importantProducerId = null
                 ui.launch { talking = false }
                 channelId?.let { socket.emit("channel:join", it) }
                 runCatching { setupMediasoup() } // rearma transportes tras reconectar
+                syncImportantSubscriptionOnWorker(channels)
                 ui.launch { connected = isChannelReady() } // En vivo solo si el audio quedó listo
             }
         }
@@ -277,6 +318,7 @@ object RadioManager {
                     RadioService.update(appRef, nm)
                 }
             }
+            worker.execute { syncImportantSubscriptionOnWorker(list) }
         }
     }
 
@@ -370,19 +412,29 @@ object RadioManager {
 
     /** Resincroniza la recepción con el producer que el servidor mantiene activo. */
     private fun reconcileIncomingAudio() {
-        if (!started || !socket.connected() || talking || consumingProducerId != null) return
+        if (!started || !socket.connected() || talking) return
         val cid = channelId ?: return
         val current = ack("ms:getProducer", JSONObject().put("channelId", cid), 1500) as? JSONObject ?: return
         val producerId = current.optString("producerId").takeIf { it.isNotBlank() }
         if (producerId == null) {
-            if (remoteProducerId != null || consumers.isNotEmpty()) closeConsumers()
-            return
+            if (remoteProducerId != null || hasConsumerForChannel(cid)) closeConsumersForChannel(cid)
+        } else if (!hasConsumerForChannel(cid) || remoteProducerId != producerId) {
+            closeConsumersForChannel(cid)
+            val label = speakerAliasFrom(current)
+            android.util.Log.w(TAG, "Resincronizando recepción del hablante activo: $label")
+            consume(producerId, label, cid)
         }
-        if (consumers.isNotEmpty() && remoteProducerId == producerId) return
-        if (consumers.isNotEmpty()) closeConsumers()
-        val label = speakerAliasFrom(current)
-        android.util.Log.w(TAG, "Resincronizando recepción del hablante activo: $label")
-        consume(producerId, label)
+
+        val important = importantChannelId ?: return
+        val priority = ack("ms:getProducer", JSONObject().put("channelId", important), 1500) as? JSONObject ?: return
+        val priorityId = priority.optString("producerId").takeIf { it.isNotBlank() }
+        if (priorityId == null) {
+            if (importantProducerId != null || hasConsumerForChannel(important)) closeConsumersForChannel(important)
+        } else if (!hasConsumerForChannel(important) || importantProducerId != priorityId) {
+            closeConsumersForChannel(important)
+            importantProducerId = priorityId
+            consume(priorityId, speakerAliasFrom(priority), important, fromImportantChannel = true)
+        }
     }
 
     /**
@@ -399,11 +451,12 @@ object RadioManager {
             }
             val cid = channelId ?: return@execute
             socket.emit("channel:join", cid)
-            if (consumers.isEmpty()) {
+            if (!hasConsumerForChannel(cid)) {
                 val cur = ack("ms:getProducer", JSONObject().put("channelId", cid)) as? JSONObject
                 val pid = cur?.optString("producerId")?.takeIf { it.isNotEmpty() }
-                if (pid != null) consume(pid, cur?.let { speakerAliasFrom(it) } ?: "Alguien del canal")
+                if (pid != null) consume(pid, cur?.let { speakerAliasFrom(it) } ?: "Alguien del canal", cid)
             }
+            syncImportantSubscriptionOnWorker(channels)
         }
     }
 
@@ -411,7 +464,51 @@ object RadioManager {
     suspend fun reloadChannels(): List<RadioChannel> {
         val latest = Backend.api.radioChannels()
         channels = latest
+        worker.execute { syncImportantSubscriptionOnWorker(latest) }
         return latest
+    }
+
+    private fun syncImportantSubscriptionOnWorker(availableChannels: List<RadioChannel>) {
+        if (!started || !socket.connected()) return
+        val next = availableChannels.firstOrNull { it.isImportant && it.id != channelId }
+        val nextId = next?.id
+        if (importantChannelId == nextId) {
+            if (next != null && recvTransport != null && !hasConsumerForChannel(next.id)) {
+                val current = ack("ms:getProducer", JSONObject().put("channelId", next.id), 1500) as? JSONObject
+                val producerId = current?.optString("producerId")?.takeIf { it.isNotBlank() }
+                if (producerId != null) {
+                    importantProducerId = producerId
+                    consume(producerId, current?.let { speakerAliasFrom(it) } ?: "Alguien", next.id, fromImportantChannel = true)
+                }
+            }
+            return
+        }
+
+        val previous = importantChannelId
+        if (previous != null) {
+            runCatching { socket.emit("channel:unlisten-important", JSONObject()) }
+            closeConsumersForChannel(previous)
+            importantChannelId = null
+            importantProducerId = null
+        }
+        if (next == null || recvTransport == null || device == null) return
+
+        val response = ack(
+            "channel:listen-important",
+            JSONObject().put("channelId", next.id),
+            1800,
+        ) as? JSONObject ?: return
+        if (!response.optBoolean("joined")) {
+            android.util.Log.w(TAG, "No se pudo activar la escucha del canal importante: ${response.optString("error")}")
+            return
+        }
+        importantChannelId = next.id
+        importantChannelName = next.name ?: "Prioritario"
+        val speaking = response.optJSONObject("speaking")
+        val live = speaking ?: (ack("ms:getProducer", JSONObject().put("channelId", next.id), 1500) as? JSONObject)
+        val producerId = live?.optString("producerId")?.takeIf { it.isNotBlank() } ?: return
+        importantProducerId = producerId
+        consume(producerId, live?.let { speakerAliasFrom(it) } ?: "Alguien", next.id, fromImportantChannel = true)
     }
 
     fun selectChannel(id: String) {
@@ -430,8 +527,10 @@ object RadioManager {
         }
         val wasTalking = talking
         remoteProducerId = null
-        consumingProducerId = null
-        talking = false; remoteSpeaking = false; speakerLabel = null; lastSpeakerLabel = null; txFailed = false
+        primarySpeakerAlias = null
+        talking = false; remoteSpeaking = false
+        speakerLabel = if (importantProducerId != null) "${importantChannelName ?: "Prioritario"} · ${importantSpeakerAlias ?: "Alguien"}" else null
+        lastSpeakerLabel = null; txFailed = false
         lastVoiceNote = null // la nota es por-canal; se recarga la del canal nuevo
         RadioService.update(appRef, channelName)
         // Salir/entrar al canal YA (NO dentro del hilo de audio): así la presencia y la
@@ -443,12 +542,13 @@ object RadioManager {
         // Audio (cerrar lo viejo + consumir al hablante del nuevo) en 2º plano: no bloquea
         // la sensación de "conectado" (los transportes persisten → seguimos EN VIVO).
         worker.execute {
-            closeConsumers()
+            prev?.let { closeConsumersForChannel(it) }
             runCatching { producer?.close() }; producer = null
             if (wasTalking) runCatching { socket.emit("ms:closeProducer") }
             val cur = ack("ms:getProducer", JSONObject().put("channelId", id)) as? JSONObject
             val curProducer = cur?.optString("producerId")?.takeIf { it.isNotEmpty() }
-            if (curProducer != null) consume(curProducer, cur?.let { speakerAliasFrom(it) } ?: "Alguien del canal")
+            if (curProducer != null) consume(curProducer, cur?.let { speakerAliasFrom(it) } ?: "Alguien del canal", id)
+            syncImportantSubscriptionOnWorker(channels)
         }
     }
 
@@ -518,7 +618,13 @@ object RadioManager {
                                 if (recvTransport !== transport || !started) return@execute
                                 val oldConsumers = consumers.values.toList()
                                 consumers.clear()
-                                consumingProducerId = null
+                                consumerProducerIds.clear()
+                                consumerChannelIds.clear()
+                                consumingProducerIds.clear()
+                                remoteProducerId = null
+                                importantProducerId = null
+                                primarySpeakerAlias = null
+                                importantSpeakerAlias = null
                                 consuming = false
                                 oldConsumers.forEach { consumer ->
                                     runCatching { socket.emit("ms:closeConsumer", JSONObject().put("consumerId", consumer.id)) }
@@ -530,6 +636,10 @@ object RadioManager {
                                 runCatching { transport.close() }
                                 android.util.Log.w(TAG, "Rearmando transporte de recepción que falló")
                                 runCatching { setupMediasoup() }
+                                if (importantChannelId != null) {
+                                    importantChannelId = null
+                                    syncImportantSubscriptionOnWorker(channels)
+                                }
                                 ui.launch { connected = isChannelReady() }
                             }
                         }
@@ -587,19 +697,32 @@ object RadioManager {
     }
 
     /** Publica de inmediato el estado del hablante, sin esperar a crear el consumer. */
-    private fun showRemoteSpeaker(producerId: String, label: String) {
-        remoteProducerId = producerId
+    private fun showRemoteSpeaker(producerId: String, label: String, fromImportantChannel: Boolean = false) {
+        if (fromImportantChannel) {
+            importantProducerId = producerId
+            importantSpeakerAlias = label
+        } else {
+            remoteProducerId = producerId
+            primarySpeakerAlias = label
+        }
         ui.launch {
-            speakerLabel = label
+            speakerLabel = if (fromImportantChannel) "${importantChannelName ?: "Prioritario"} · $label" else label
             RadioService.refresh(appRef)
         }
     }
 
     private fun clearRemoteSpeaker(producerId: String) {
-        if (remoteProducerId != producerId) return
-        remoteProducerId = null
+        val wasPrimary = remoteProducerId == producerId
+        val wasImportant = importantProducerId == producerId
+        if (!wasPrimary && !wasImportant) return
+        if (wasPrimary) { remoteProducerId = null; primarySpeakerAlias = null }
+        if (wasImportant) { importantProducerId = null; importantSpeakerAlias = null }
         ui.launch {
-            if (remoteProducerId == null) {
+            if (importantProducerId != null) {
+                speakerLabel = "${importantChannelName ?: "Prioritario"} · ${importantSpeakerAlias ?: "Alguien"}"
+            } else if (remoteProducerId != null) {
+                speakerLabel = primarySpeakerAlias
+            } else {
                 speakerLabel?.let { lastSpeakerLabel = it }
                 remoteSpeaking = false
                 speakerLabel = null
@@ -616,17 +739,21 @@ object RadioManager {
         return nick ?: name ?: "Alguien del canal"
     }
 
-    private fun consume(producerId: String, speaker: String) {
-        if (consumingProducerId == producerId) return
-        showRemoteSpeaker(producerId, speaker)
-        consumingProducerId = producerId
+    private fun consume(
+        producerId: String,
+        speaker: String,
+        sourceChannelId: String = channelId.orEmpty(),
+        fromImportantChannel: Boolean = false,
+    ) {
+        if (!consumingProducerIds.add(producerId)) return
+        showRemoteSpeaker(producerId, speaker, fromImportantChannel)
         var createdConsumer: Consumer? = null
         try {
-            val recv = recvTransport ?: run { consumingProducerId = null; return }
-            val dev = device ?: run { consumingProducerId = null; return }
+            val recv = recvTransport ?: run { consumingProducerIds.remove(producerId); return }
+            val dev = device ?: run { consumingProducerIds.remove(producerId); return }
             val info = ack("ms:consume", JSONObject().put("producerId", producerId).put("rtpCapabilities", JSONObject(dev.rtpCapabilities))) as? JSONObject
             if (info == null || info.has("error")) {
-                consumingProducerId = null
+                consumingProducerIds.remove(producerId)
                 clearRemoteSpeaker(producerId)
                 return
             }
@@ -635,9 +762,11 @@ object RadioManager {
                     override fun onTransportClose(consumer: Consumer) {
                         worker.execute {
                             if (consumers.remove(consumer.id) != null) {
+                                val closedProducer = consumerProducerIds.remove(consumer.id)
+                                consumerChannelIds.remove(consumer.id)
+                                if (closedProducer != null) consumingProducerIds.remove(closedProducer)
                                 runCatching { socket.emit("ms:closeConsumer", JSONObject().put("consumerId", consumer.id)) }
                                 consuming = consumers.isNotEmpty()
-                                consumingProducerId = null
                                 if (consumers.isEmpty()) releaseAudioSession()
                                 android.util.Log.w(TAG, "Consumer cerrado por transporte; se resincronizará el canal")
                             }
@@ -651,6 +780,8 @@ object RadioManager {
             )
             createdConsumer = consumer
             consumers[consumer.id] = consumer
+            consumerProducerIds[consumer.id] = producerId
+            consumerChannelIds[consumer.id] = sourceChannelId
             lastInboundBytesReceived = -1L
             lastInboundProgressAt = android.os.SystemClock.uptimeMillis()
             applyRemoteTrackVolume(consumer)
@@ -661,37 +792,43 @@ object RadioManager {
             acquireAudioSession()
             if (!awaitSelectedCommunicationRoute()) {
                 android.util.Log.w(TAG, "Consumer pausado: no se confirmó la ruta de audio seleccionada")
-                consuming = false
                 consumers.remove(consumer.id)
+                consumerProducerIds.remove(consumer.id)
+                consumerChannelIds.remove(consumer.id)
+                consumingProducerIds.remove(producerId)
                 runCatching { consumer.close() }
                 runCatching { socket.emit("ms:closeConsumer", JSONObject().put("consumerId", consumer.id)) }
-                consumingProducerId = null
+                consuming = consumers.isNotEmpty()
                 clearRemoteSpeaker(producerId)
-                releaseAudioSession()
+                if (consumers.isEmpty()) releaseAudioSession()
                 return
             }
             val resumed = ack("ms:resume", JSONObject().put("consumerId", consumer.id), 2000) as? JSONObject
             if (resumed?.optBoolean("resumed") != true) {
                 consumers.remove(consumer.id)
+                consumerProducerIds.remove(consumer.id)
+                consumerChannelIds.remove(consumer.id)
+                consumingProducerIds.remove(producerId)
                 runCatching { consumer.close() }
                 runCatching { socket.emit("ms:closeConsumer", JSONObject().put("consumerId", consumer.id)) }
                 consuming = consumers.isNotEmpty()
-                consumingProducerId = null
                 if (consumers.isEmpty()) releaseAudioSession()
                 android.util.Log.w(TAG, "El servidor no reanudó el consumer; queda habilitado el reintento")
                 return
             }
-            ui.launch { speakerLabel = speaker }
+            ui.launch { speakerLabel = if (fromImportantChannel) "${importantChannelName ?: "Prioritario"} · $speaker" else speaker }
         } catch (t: Throwable) {
             // No tumbar la app si falla crear/arrancar el consumer (p.ej. al entrar
             // varios a la vez): liberar estado para que la resincronización reintente.
             createdConsumer?.let { consumer ->
                 consumers.remove(consumer.id)
+                consumerProducerIds.remove(consumer.id)
+                consumerChannelIds.remove(consumer.id)
                 runCatching { socket.emit("ms:closeConsumer", JSONObject().put("consumerId", consumer.id)) }
                 runCatching { consumer.close() }
             }
             consuming = consumers.isNotEmpty()
-            if (consumingProducerId == producerId) consumingProducerId = null
+            consumingProducerIds.remove(producerId)
             if (consumers.isEmpty()) releaseAudioSession()
             android.util.Log.e(TAG, "No se pudo iniciar consumer de $speaker; se reintentará", t)
             clearRemoteSpeaker(producerId)
@@ -703,8 +840,13 @@ object RadioManager {
         // un consumer que se está cerrando. Todo serializado en el worker.
         val snapshot = consumers.values.toList()
         consumers.clear()
-        consumingProducerId = null
+        consumerProducerIds.clear()
+        consumerChannelIds.clear()
+        consumingProducerIds.clear()
         remoteProducerId = null
+        importantProducerId = null
+        primarySpeakerAlias = null
+        importantSpeakerAlias = null
         snapshot.forEach { runCatching { it.close() } }
         consuming = false
         releaseAudioSession() // dejé de recibir: libera el audio si tampoco estoy hablando
@@ -715,6 +857,56 @@ object RadioManager {
             RadioService.refresh(appRef)
         }
     }
+
+    private fun closeConsumersForProducer(producerId: String) {
+        val ids = consumerProducerIds.filterValues { it == producerId }.keys.toList()
+        ids.forEach { id ->
+            val consumer = consumers.remove(id) ?: return@forEach
+            consumerProducerIds.remove(id)
+            consumerChannelIds.remove(id)
+            consumingProducerIds.remove(producerId)
+            runCatching { socket.emit("ms:closeConsumer", JSONObject().put("consumerId", id)) }
+            runCatching { consumer.close() }
+        }
+        if (remoteProducerId == producerId) { remoteProducerId = null; primarySpeakerAlias = null }
+        if (importantProducerId == producerId) { importantProducerId = null; importantSpeakerAlias = null }
+        finishClosingConsumers()
+    }
+
+    private fun closeConsumersForChannel(sourceChannelId: String) {
+        val ids = consumerChannelIds.filterValues { it == sourceChannelId }.keys.toList()
+        ids.forEach { id ->
+            val consumer = consumers.remove(id) ?: return@forEach
+            val producerId = consumerProducerIds.remove(id)
+            consumerChannelIds.remove(id)
+            if (producerId != null) consumingProducerIds.remove(producerId)
+            runCatching { socket.emit("ms:closeConsumer", JSONObject().put("consumerId", id)) }
+            runCatching { consumer.close() }
+        }
+        if (sourceChannelId == channelId) { remoteProducerId = null; primarySpeakerAlias = null }
+        if (sourceChannelId == importantChannelId) { importantProducerId = null; importantSpeakerAlias = null }
+        finishClosingConsumers()
+    }
+
+    private fun finishClosingConsumers() {
+        consuming = consumers.isNotEmpty()
+        if (consumers.isEmpty()) releaseAudioSession()
+        ui.launch {
+            speakerLabel = when {
+                importantProducerId != null -> "${importantChannelName ?: "Prioritario"} · ${importantSpeakerAlias ?: "Alguien"}"
+                remoteProducerId != null -> primarySpeakerAlias
+                else -> {
+                    speakerLabel?.let { lastSpeakerLabel = it }
+                    remoteSpeaking = false
+                    null
+                }
+            }
+            RadioService.refresh(appRef)
+        }
+    }
+
+    private fun hasConsumerForChannel(sourceChannelId: String): Boolean =
+        consumerChannelIds.values.any { it == sourceChannelId }
 
     /** Chirrido de grillo al abrir/cerrar PTT; reproducción aparte para no retrasar la voz. */
     private fun beep(durationMs: Int, waitUntilPlayed: Boolean = false) {
@@ -867,7 +1059,7 @@ object RadioManager {
             pttStartInProgress.set(false)
             return
         }
-        if (remoteSpeaking || remoteProducerId != null) {
+        if (remoteSpeaking || remoteProducerId != null || importantProducerId != null) {
             pttStartInProgress.set(false)
             val who = speakerLabel ?: "Alguien"
             appRef?.let { android.widget.Toast.makeText(it, "$who está hablando", android.widget.Toast.LENGTH_SHORT).show() }
@@ -1209,7 +1401,7 @@ object RadioManager {
         onState: (String?) -> Unit,
     ) {
         if (notePlayingId == id) { stopVoiceNote(onState); return }
-        if (talking || consuming || remoteProducerId != null) {
+        if (talking || consuming || remoteProducerId != null || importantProducerId != null) {
             ui.launch { onState(null) }
             android.util.Log.i(TAG, "voice note deferred: radio audio has priority")
             return
@@ -1252,7 +1444,7 @@ object RadioManager {
             notePlayingId = id
             noteStateCallback = onState
             mp.setOnPreparedListener {
-                if (notePlayer !== it || talking || consuming || remoteProducerId != null) {
+                if (notePlayer !== it || talking || consuming || remoteProducerId != null || importantProducerId != null) {
                     runCatching { it.release() }
                     return@setOnPreparedListener
                 }
@@ -1307,14 +1499,21 @@ object RadioManager {
             while (started) {
                 // Lee el stats nativo SOLO en el worker (mismo hilo que produce/consume/
                 // close): nunca se toca WebRTC desde dos hilos → sin crash al entrar varios.
-                val statsJson = when {
-                    talking -> withContext(workerDispatcher) { runCatching { producer?.stats }.getOrNull() }
-                    consuming || consumers.isNotEmpty() -> withContext(workerDispatcher) { runCatching { consumers.values.firstOrNull()?.stats }.getOrNull() }
-                    else -> null
+                val (incomingStats, primaryStats) = when {
+                    talking -> Pair(emptyList(), null)
+                    consuming || consumers.isNotEmpty() -> withContext(workerDispatcher) {
+                        val snapshot = consumers.entries.mapNotNull { (id, consumer) ->
+                            runCatching { consumer.stats }.getOrNull()?.let { id to it }
+                        }
+                        val primaryId = remoteProducerId
+                        val mainStats = snapshot.firstOrNull { (id, _) -> consumerProducerIds[id] == primaryId }?.second
+                        Pair(snapshot.map { it.second }, mainStats)
+                    }
+                    else -> Pair(emptyList(), null)
                 }
                 // audioLevel de WebRTC es RMS (voz ≈ 0..0.3): lo amplificamos y suavizamos.
-                val raw = statsJson?.let { runCatching { parseAudioLevel(it) }.getOrNull() } ?: 0f
-                if (!talking && consuming && statsJson != null) monitorIncomingPackets(statsJson)
+                val raw = incomingStats.mapNotNull { runCatching { parseAudioLevel(it) }.getOrNull() }.maxOrNull() ?: 0f
+                if (!talking && primaryStats != null) monitorIncomingPackets(primaryStats)
                 val target = (raw * 3.4f).coerceIn(0f, 1f)
                 audioLevel += (target - audioLevel) * 0.45f
                 if (!talking && (consuming || consumers.isNotEmpty())) {
@@ -1386,7 +1585,7 @@ object RadioManager {
                 if (active.optString("producerId") != producerId) return@execute
                 val label = speakerAliasFrom(active)
                 android.util.Log.w(TAG, "Sin paquetes entrantes durante 9 s; reconstruyendo consumer de $label")
-                closeConsumers()
+                closeConsumersForChannel(channelId.orEmpty())
                 consume(producerId, label)
             } finally {
                 consumerRecoveryInProgress.set(false)
@@ -1668,8 +1867,11 @@ object RadioManager {
             runCatching { sendTransport?.close() }; sendTransport = null
             runCatching { recvTransport?.close() }; recvTransport = null
             runCatching { device?.dispose() }; device = null
+            runCatching { radioSocket.emit("channel:unlisten-important", JSONObject()) }
             channelId?.let { radioSocket.emit("channel:leave", it) }
+            importantChannelId = null
             radioSocket.off("ms:newProducer"); radioSocket.off("ms:producerClosed")
+            radioSocket.off("channel:important-changed")
             radioConnectListener?.let { radioSocket.off("connect", it) }
             radioDisconnectListener?.let { radioSocket.off("disconnect", it) }
             radioConnectListener = null
