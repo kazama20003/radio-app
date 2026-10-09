@@ -40,6 +40,10 @@ interface ApiService {
     @POST("users/{id}/photo")
     suspend fun uploadUserPhoto(@Path("id") id: String, @Part file: MultipartBody.Part): AuthUser
 
+    @Multipart
+    @POST("users/me/photo")
+    suspend fun uploadMyPhoto(@Part file: MultipartBody.Part): AuthUser
+
     @GET("settings")
     suspend fun settings(): AppSetting
 

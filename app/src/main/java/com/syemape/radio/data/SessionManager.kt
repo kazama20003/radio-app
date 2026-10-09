@@ -16,6 +16,11 @@ object SessionManager {
     var user by mutableStateOf<AuthUser?>(null)
         private set
 
+    fun updateUser(updated: AuthUser) {
+        user = updated
+        Backend.tokens.saveUser(updated)
+    }
+
     /** Restaura sesión persistida al arrancar. */
     fun bootstrap() {
         val t = Backend.tokens

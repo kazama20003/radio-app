@@ -1,6 +1,10 @@
 package com.syemape.radio
 
 import android.app.Application
+import java.io.File
+import coil.Coil
+import coil.ImageLoader
+import coil.disk.DiskCache
 
 /**
  * Application: inicializa la capa de datos en CUALQUIER arranque del proceso,
@@ -12,6 +16,16 @@ class RadioApp : Application() {
     override fun onCreate() {
         super.onCreate()
         installCrashGuard()
+        Coil.setImageLoader(
+            ImageLoader.Builder(this)
+                .diskCache {
+                    DiskCache.Builder()
+                        .directory(File(cacheDir, "profile-image-cache"))
+                        .maxSizeBytes(64L * 1024 * 1024)
+                        .build()
+                }
+                .build(),
+        )
         com.syemape.radio.data.Backend.init(this)
         com.syemape.radio.data.Prefs.init(this)
         com.syemape.radio.data.Notifier.init(this)

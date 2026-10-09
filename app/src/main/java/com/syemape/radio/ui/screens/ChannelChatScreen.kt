@@ -2,6 +2,8 @@ package com.syemape.radio.ui.screens
 
 import android.content.Intent
 import android.net.Uri
+import android.app.Activity
+import androidx.core.content.FileProvider
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -53,6 +55,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import coil.compose.AsyncImage
+import coil.compose.SubcomposeAsyncImage
+import coil.compose.SubcomposeAsyncImageContent
 import com.syemape.radio.BuildConfig
 import com.syemape.radio.data.Backend
 import com.syemape.radio.data.Fmt
@@ -68,6 +72,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.File
 import androidx.compose.runtime.withFrameNanos
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -135,8 +140,10 @@ fun ChannelChatScreen(channelId: String, title: String, topPadding: Dp, bottomPa
     var oldestHistoryCursor by remember(channelId) { mutableStateOf<String?>(null) }
 
     var uploading by remember { mutableStateOf(false) }
+    var uploadProgress by remember { mutableStateOf(0f) }
     var attachMenu by remember { mutableStateOf(false) }
     var fullscreenImage by remember { mutableStateOf<String?>(null) }
+    var cameraOutput by remember { mutableStateOf<Uri?>(null) }
 
     fun toast(msg: String) = android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_SHORT).show()
 
@@ -144,10 +151,16 @@ fun ChannelChatScreen(channelId: String, title: String, topPadding: Dp, bottomPa
     fun openExternally(key: String?) {
         val url = urlOf(key) ?: return
         runCatching {
-            context.startActivity(
-                Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
-            )
-        }.onFailure { toast("No se pudo abrir el archivo") }
+            val uri = Uri.parse(url)
+            val filename = uri.lastPathSegment?.substringAfterLast('/')?.takeIf { it.isNotBlank() } ?: "archivo-chat"
+            val request = android.app.DownloadManager.Request(uri)
+                .setTitle(filename)
+                .setDescription("Descarga del chat")
+                .setNotificationVisibility(android.app.DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+                .setDestinationInExternalFilesDir(context, android.os.Environment.DIRECTORY_DOWNLOADS, filename)
+            (context.getSystemService(android.content.Context.DOWNLOAD_SERVICE) as android.app.DownloadManager).enqueue(request)
+            toast("Descarga iniciada; puedes ver el progreso en las notificaciones")
+        }.onFailure { toast("No se pudo descargar el archivo") }
     }
 
     // Sube un adjunto elegido y lo publica en el canal.
@@ -159,8 +172,13 @@ fun ChannelChatScreen(channelId: String, title: String, topPadding: Dp, bottomPa
         }
         scope.launch {
             uploading = true
+            uploadProgress = 0f
             val outcome = withContext(Dispatchers.IO) {
-                runCatching { MediaUploader.upload(context, picked) }
+                runCatching {
+                    MediaUploader.upload(context, picked) { progress ->
+                        scope.launch(Dispatchers.Main) { uploadProgress = progress }
+                    }
+                }
             }
             uploading = false
             val res = outcome.getOrNull()
@@ -189,10 +207,34 @@ fun ChannelChatScreen(channelId: String, title: String, topPadding: Dp, bottomPa
     val pickFile = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) sendMedia(uri)
     }
+    val takeCameraMedia = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        val captured = cameraOutput
+        cameraOutput = null
+        if (result.resultCode == Activity.RESULT_OK && captured != null) sendMedia(captured)
+        else captured?.let { runCatching { context.contentResolver.delete(it, null, null) } }
+    }
+
+    fun launchNativeCamera(video: Boolean) {
+        runCatching {
+            val file = File.createTempFile(if (video) "channel-video-" else "channel-photo-", if (video) ".mp4" else ".jpg", context.cacheDir)
+            val output = FileProvider.getUriForFile(context, "${BuildConfig.APPLICATION_ID}.fileprovider", file)
+            val action = if (video) android.provider.MediaStore.ACTION_VIDEO_CAPTURE else android.provider.MediaStore.ACTION_IMAGE_CAPTURE
+            val intent = Intent(action).putExtra(android.provider.MediaStore.EXTRA_OUTPUT, output)
+                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+            if (intent.resolveActivity(context.packageManager) == null) {
+                file.delete()
+                toast("No hay una cámara disponible")
+            } else {
+                cameraOutput = output
+                takeCameraMedia.launch(intent)
+            }
+        }.onFailure { toast("No se pudo abrir la cámara") }
+    }
 
     // Notas de voz: las reproduce RadioManager con el MISMO enrutado que la radio
     // (stream de llamada + altavoz + volumen de la radio) para que suenen fuerte.
     var playingId by remember { mutableStateOf<String?>(null) }
+    var loadingVoiceId by remember { mutableStateOf<String?>(null) }
     var playbackQueue by remember { mutableStateOf<List<RadioTransmission>>(emptyList()) }
     var playbackGeneration by remember { mutableStateOf(0) }
     fun scrollToVoice(id: String) {
@@ -221,6 +263,7 @@ fun ChannelChatScreen(channelId: String, title: String, topPadding: Dp, bottomPa
             scope.launch { playSequence(sequence, index + 1, generation) }
             return
         }
+        loadingVoiceId = note.id
         com.syemape.radio.data.RadioManager.playVoiceNote(
             url = url,
             id = note.id,
@@ -229,6 +272,7 @@ fun ChannelChatScreen(channelId: String, title: String, topPadding: Dp, bottomPa
             },
             onState = {
                 playingId = it
+                if (it == note.id || (it == null && loadingVoiceId == note.id)) loadingVoiceId = null
                 if (it != null) scrollToVoice(it)
             },
         )
@@ -307,9 +351,10 @@ fun ChannelChatScreen(channelId: String, title: String, topPadding: Dp, bottomPa
         }
     }
     fun toggleVoice(t: RadioTransmission) {
-        if (playingId == t.id) {
+        if (playingId == t.id || loadingVoiceId == t.id) {
             playbackGeneration++
             playbackQueue = emptyList()
+            loadingVoiceId = null
             com.syemape.radio.data.RadioManager.stopVoiceNote { playingId = null }
             return
         }
@@ -318,6 +363,7 @@ fun ChannelChatScreen(channelId: String, title: String, topPadding: Dp, bottomPa
         if (start < 0) return
         playbackGeneration++
         playbackQueue = sequence.drop(start)
+        loadingVoiceId = t.id
         playSequence(playbackQueue, 0, playbackGeneration)
     }
 
@@ -417,7 +463,7 @@ fun ChannelChatScreen(channelId: String, title: String, topPadding: Dp, bottomPa
                             Spacer(Modifier.height(2.dp))
                         }
                         when {
-                            t.audioKey != null -> VoiceBubble(t, mine, playingId == t.id) { toggleVoice(t) }
+                            t.audioKey != null -> VoiceBubble(t, mine, playingId == t.id, loadingVoiceId == t.id) { toggleVoice(t) }
                             t.imageKey != null -> ImageBubble(urlOf(t.imageKey)) { urlOf(t.imageKey)?.let { fullscreenImage = it } }
                             t.videoKey != null -> MediaCard(MapeIcons.Video, "Video", t.fileName ?: "Toca para reproducir", t.fileSize, mine) { openExternally(t.videoKey) }
                             t.fileKey != null -> MediaCard(MapeIcons.FileDoc, t.fileName ?: "Archivo", "Toca para abrir", t.fileSize, mine) { openExternally(t.fileKey) }
@@ -474,6 +520,13 @@ fun ChannelChatScreen(channelId: String, title: String, topPadding: Dp, bottomPa
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
+            if (uploading) Text(
+                "${(uploadProgress * 100).toInt()}%",
+                color = MapeColors.Red,
+                fontFamily = Outfit,
+                fontWeight = FontWeight.Bold,
+                fontSize = 11.sp,
+            )
             // Botón adjuntar (foto/video o archivo). Muestra spinner mientras sube.
             Box {
                 Box(
@@ -489,6 +542,16 @@ fun ChannelChatScreen(channelId: String, title: String, topPadding: Dp, bottomPa
                     }
                 }
                 DropdownMenu(expanded = attachMenu, onDismissRequest = { attachMenu = false }) {
+                    DropdownMenuItem(
+                        text = { Text("Tomar foto", fontFamily = Outfit) },
+                        leadingIcon = { Icon(MapeIcons.Image, null, modifier = Modifier.size(20.dp)) },
+                        onClick = { attachMenu = false; launchNativeCamera(video = false) },
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Grabar video", fontFamily = Outfit) },
+                        leadingIcon = { Icon(MapeIcons.Video, null, modifier = Modifier.size(20.dp)) },
+                        onClick = { attachMenu = false; launchNativeCamera(video = true) },
+                    )
                     DropdownMenuItem(
                         text = { Text("Foto o video", fontFamily = Outfit) },
                         leadingIcon = { Icon(MapeIcons.Image, null, modifier = Modifier.size(20.dp)) },
@@ -577,7 +640,7 @@ private fun ChannelDateDivider(label: String) {
 }
 
 @Composable
-private fun VoiceBubble(t: RadioTransmission, mine: Boolean, playing: Boolean, onToggle: () -> Unit) {
+private fun VoiceBubble(t: RadioTransmission, mine: Boolean, playing: Boolean, loading: Boolean, onToggle: () -> Unit) {
     Row(
         Modifier.pressScale { onToggle() },
         verticalAlignment = Alignment.CenterVertically,
@@ -587,7 +650,9 @@ private fun VoiceBubble(t: RadioTransmission, mine: Boolean, playing: Boolean, o
             Modifier.size(34.dp).clip(CircleShape).background(if (mine) MapeColors.White else MapeColors.Ink),
             contentAlignment = Alignment.Center,
         ) {
-            Icon(
+            if (loading) androidx.compose.material3.CircularProgressIndicator(
+                modifier = Modifier.size(17.dp), color = if (mine) MapeColors.Ink else MapeColors.White, strokeWidth = 2.dp,
+            ) else Icon(
                 if (playing) MapeIcons.Pause else MapeIcons.Play,
                 null,
                 tint = if (mine) MapeColors.Ink else MapeColors.White,
@@ -604,7 +669,7 @@ private fun VoiceBubble(t: RadioTransmission, mine: Boolean, playing: Boolean, o
 
 @Composable
 private fun ImageBubble(url: String?, onClick: () -> Unit) {
-    AsyncImage(
+    SubcomposeAsyncImage(
         model = url,
         contentDescription = "Imagen",
         contentScale = ContentScale.Crop,
@@ -613,6 +678,15 @@ private fun ImageBubble(url: String?, onClick: () -> Unit) {
             .heightIn(max = 260.dp)
             .clip(RoundedCornerShape(12.dp))
             .pressScale { onClick() },
+        loading = {
+            Box(Modifier.size(150.dp, 96.dp).clip(RoundedCornerShape(12.dp)).background(MapeColors.Card), contentAlignment = Alignment.Center) {
+                androidx.compose.material3.CircularProgressIndicator(modifier = Modifier.size(24.dp), color = MapeColors.Red, strokeWidth = 2.dp)
+            }
+        },
+        error = {
+            Text("No se pudo cargar la imagen", color = MapeColors.TextMuted, fontFamily = Outfit, fontSize = 12.sp)
+        },
+        success = { SubcomposeAsyncImageContent() },
     )
 }
 

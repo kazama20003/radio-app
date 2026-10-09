@@ -38,6 +38,10 @@ class TokenStore(context: Context) {
     fun loadUser(): AuthUser? =
         prefs.getString("user", null)?.let { runCatching { gson.fromJson(it, AuthUser::class.java) }.getOrNull() }
 
+    fun saveUser(user: AuthUser) {
+        prefs.edit().putString("user", gson.toJson(user)).apply()
+    }
+
     fun clear() {
         accessToken = null
         refreshToken = null

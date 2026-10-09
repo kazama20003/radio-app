@@ -57,6 +57,7 @@ data class LivePerson(
     val name: String? = null,
     val nickname: String? = null,
     val avatarKey: String? = null,
+    val photoUrl: String? = null,
     val role: String? = null,
     val lastLat: Double? = null,
     val lastLng: Double? = null,
@@ -70,6 +71,7 @@ data class MiniUser(
     val name: String? = null,
     val nickname: String? = null,
     val avatarKey: String? = null,
+    val photoUrl: String? = null,
     val isOnline: Boolean = false,
 )
 

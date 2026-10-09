@@ -104,7 +104,27 @@ private fun InfoRow(label: String, value: String) {
 
 @Composable
 fun AccountScreen(topPadding: Dp, onBack: () -> Unit) {
-    val u = SessionManager.user
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var u by remember { mutableStateOf(SessionManager.user) }
+    var changingPhoto by remember { mutableStateOf(false) }
+    var photoMessage by remember { mutableStateOf<String?>(null) }
+    val choosePhoto = rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.GetContent()) { uri ->
+        if (uri != null) scope.launch {
+            changingPhoto = true
+            photoMessage = null
+            try {
+                val picked = MediaUploader.query(context, uri)
+                u = MediaUploader.uploadMyProfilePhoto(context, picked)
+                    .also(SessionManager::updateUser)
+                photoMessage = "Foto de perfil actualizada"
+            } catch (e: Exception) {
+                photoMessage = e.message?.takeIf(String::isNotBlank) ?: "No se pudo cambiar la foto"
+            } finally {
+                changingPhoto = false
+            }
+        }
+    }
     val role = when (u?.role) { "ADMIN" -> "Administrador"; "SUPERVISOR" -> "Supervisor"; else -> "Operador" }
     SubScreen("Mi cuenta", topPadding, onBack) {
         LazyColumn(
@@ -114,13 +134,19 @@ fun AccountScreen(topPadding: Dp, onBack: () -> Unit) {
         ) {
             item {
                 Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(22.dp)).background(MapeColors.Ink).padding(18.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                    Avatar(initialsOf(u?.name ?: "?"), MapeColors.Red, size = 60.dp, border = 3.dp, borderColor = MapeColors.White)
+                    Box(Modifier.size(68.dp).clip(CircleShape).background(MapeColors.Red).clickable(enabled = !changingPhoto) { choosePhoto.launch("image/*") }, contentAlignment = Alignment.Center) {
+                        Avatar(initialsOf(u?.name ?: "?"), MapeColors.Red, size = 64.dp, border = 2.dp, borderColor = MapeColors.White)
+                        if (!u?.photoUrl.isNullOrBlank()) AsyncImage(u?.photoUrl, contentDescription = "Foto de perfil", modifier = Modifier.size(64.dp).clip(CircleShape))
+                        if (changingPhoto) CircularProgressIndicator(Modifier.size(22.dp), color = MapeColors.White, strokeWidth = 2.dp)
+                    }
                     Column {
                         Text(u?.nickname ?: u?.name ?: "—", color = MapeColors.White, fontFamily = Outfit, fontWeight = FontWeight.SemiBold, fontSize = 20.sp)
                         Text(role, color = MapeColors.TextOnDarkSoft, fontFamily = Outfit, fontSize = 13.sp)
+                        Text(if (changingPhoto) "Subiendo foto…" else "Toca la foto para cambiarla", color = MapeColors.TextOnDarkSoft, fontFamily = Outfit, fontSize = 11.sp)
                     }
                 }
             }
+            photoMessage?.let { item { Text(it, color = MapeColors.Red, fontFamily = Outfit, fontSize = 12.sp) } }
             item { InfoRow("Nombre", u?.name ?: "") }
             item { InfoRow("Apelativo", u?.nickname ?: "") }
             item { InfoRow("Correo", u?.email ?: "") }

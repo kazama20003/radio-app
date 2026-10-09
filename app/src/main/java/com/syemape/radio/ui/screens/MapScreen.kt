@@ -40,6 +40,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import coil.compose.AsyncImage
 import com.google.android.gms.maps.model.LatLng
 import com.syemape.radio.data.Backend
 import com.syemape.radio.data.DirectionsResult
@@ -444,6 +445,8 @@ private fun MapPreview(
     boxModifier: Modifier,
 ) {
     val cameraScope = rememberCoroutineScope()
+    var satellite by remember { mutableStateOf(false) }
+    var traffic by remember { mutableStateOf(false) }
     val located = people.filter { isValidCoordinate(it.lastLat, it.lastLng) }
     val firstUnit = units.firstOrNull { isValidCoordinate(it.lat, it.lng) }
     val firstLat = located.firstOrNull()?.lastLat ?: firstUnit?.lat
@@ -501,6 +504,8 @@ private fun MapPreview(
             properties = com.google.maps.android.compose.MapProperties(
                 // Keep geographic tiles readable even when the rest of the app uses dark mode.
                 mapStyleOptions = null,
+                mapType = if (satellite) com.google.maps.android.compose.MapType.SATELLITE else com.google.maps.android.compose.MapType.NORMAL,
+                isTrafficEnabled = traffic,
             ),
             uiSettings = com.google.maps.android.compose.MapUiSettings(zoomControlsEnabled = false, mapToolbarEnabled = false),
         ) {
@@ -567,6 +572,13 @@ private fun MapPreview(
                 },
             contentAlignment = Alignment.Center,
         ) { Icon(MapeIcons.Locate, null, tint = MapeColors.Text, modifier = Modifier.size(20.dp)) }
+        Row(
+            Modifier.align(Alignment.BottomStart).padding(10.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            MapLayerChip("Satélite", satellite) { satellite = !satellite }
+            MapLayerChip("Tráfico", traffic) { traffic = !traffic }
+        }
     }
 }
 
@@ -582,6 +594,21 @@ private fun darkMapStyleOptions() = com.google.android.gms.maps.model.MapStyleOp
       {"featureType":"landscape","elementType":"geometry","stylers":[{"color":"#202020"}]}
     ]""".trimIndent(),
 )
+
+@Composable
+private fun MapLayerChip(label: String, selected: Boolean, onClick: () -> Unit) {
+    Text(
+        label,
+        color = if (selected) MapeColors.White else MapeColors.Text,
+        fontFamily = Outfit,
+        fontWeight = FontWeight.SemiBold,
+        fontSize = 11.sp,
+        modifier = Modifier.clip(CircleShape)
+            .background(if (selected) MapeColors.Red else MapeColors.Card)
+            .pressScale { onClick() }
+            .padding(horizontal = 11.dp, vertical = 8.dp),
+    )
+}
 
 @Composable
 private fun OperatorMarker(p: LivePerson, selected: Boolean, isMe: Boolean) {
@@ -600,7 +627,13 @@ private fun OperatorMarker(p: LivePerson, selected: Boolean, isMe: Boolean) {
             Modifier.size(ringSize).clip(CircleShape).background(ring),
             contentAlignment = Alignment.Center,
         ) {
-            Avatar(initialsOf(p.name ?: p.nickname ?: "?"), avatarColor(p.id), size = avatarSize, border = 2.dp, borderColor = MapeColors.White)
+            Box(Modifier.size(avatarSize), contentAlignment = Alignment.Center) {
+                Avatar(initialsOf(p.name ?: p.nickname ?: "?"), avatarColor(p.id), size = avatarSize, border = 2.dp, borderColor = MapeColors.White)
+                if (!p.photoUrl.isNullOrBlank()) AsyncImage(
+                    model = p.photoUrl, contentDescription = "Foto de $label",
+                    modifier = Modifier.size(avatarSize - 3.dp).clip(CircleShape), contentScale = ContentScale.Crop,
+                )
+            }
         }
         if (selected) {
             Spacer(Modifier.height(3.dp))
@@ -628,7 +661,13 @@ private fun PersonCard(p: LivePerson, isMe: Boolean, selected: Boolean, onSelect
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Avatar(initialsOf(p.name ?: "?"), avatarColor(p.id), size = 44.dp)
+        Box(Modifier.size(44.dp), contentAlignment = Alignment.Center) {
+            Avatar(initialsOf(p.name ?: "?"), avatarColor(p.id), size = 44.dp)
+            if (!p.photoUrl.isNullOrBlank()) AsyncImage(
+                model = p.photoUrl, contentDescription = "Foto de ${p.nickname ?: p.name}",
+                modifier = Modifier.size(42.dp).clip(CircleShape), contentScale = ContentScale.Crop,
+            )
+        }
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Text(name, color = MapeColors.Text, fontFamily = Outfit, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
             Text(
