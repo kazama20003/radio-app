@@ -33,6 +33,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.platform.LocalContext
@@ -41,6 +43,12 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import coil.Coil
+import coil.request.ImageRequest
+import android.graphics.drawable.BitmapDrawable
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import com.google.android.gms.maps.model.LatLng
 import com.syemape.radio.data.Backend
 import com.syemape.radio.data.DirectionsResult
@@ -445,9 +453,27 @@ private fun MapPreview(
     boxModifier: Modifier,
 ) {
     val cameraScope = rememberCoroutineScope()
-    var satellite by remember { mutableStateOf(false) }
-    var traffic by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+    var satellite by remember { mutableStateOf(true) }
+    var traffic by remember { mutableStateOf(true) }
     val located = people.filter { isValidCoordinate(it.lastLat, it.lastLng) }
+    val photoSources = located.map { it.id to it.photoUrl }
+    var markerPhotos by remember { mutableStateOf<Map<String, ImageBitmap>>(emptyMap()) }
+    LaunchedEffect(photoSources) {
+        val loader = Coil.imageLoader(context)
+        val loaded = coroutineScope {
+            photoSources.mapNotNull { (id, url) ->
+                if (url.isNullOrBlank()) null else async {
+                    runCatching {
+                        val request = ImageRequest.Builder(context).data(url).allowHardware(false).build()
+                        val drawable = loader.execute(request).drawable as? BitmapDrawable
+                        drawable?.bitmap?.asImageBitmap()?.let { id to it }
+                    }.getOrNull()
+                }
+            }.awaitAll().filterNotNull().toMap()
+        }
+        markerPhotos = loaded
+    }
     val firstUnit = units.firstOrNull { isValidCoordinate(it.lat, it.lng) }
     val firstLat = located.firstOrNull()?.lastLat ?: firstUnit?.lat
     val firstLng = located.firstOrNull()?.lastLng ?: firstUnit?.lng
@@ -522,12 +548,13 @@ private fun MapPreview(
                 st.position = pos
             com.google.maps.android.compose.MarkerComposable(
                     p.id, p.id == selectedId, p.id == meId, p.nickname ?: "", p.avatarKey ?: "",
+                    p.photoUrl ?: "", markerPhotos[p.id]?.hashCode() ?: 0,
                     state = st,
                     title = p.nickname?.takeIf { it.isNotBlank() } ?: p.name ?: "Operador",
                     anchor = androidx.compose.ui.geometry.Offset(0.5f, 1f),
                     onClick = { onMarkerClick(p.id); true },
                 ) {
-                    OperatorMarker(p, selected = p.id == selectedId, isMe = p.id == meId)
+                    OperatorMarker(p, selected = p.id == selectedId, isMe = p.id == meId, photo = markerPhotos[p.id])
                 }
             }
             units.filter { isValidCoordinate(it.lat, it.lng) }.forEach { u ->
@@ -611,7 +638,7 @@ private fun MapLayerChip(label: String, selected: Boolean, onClick: () -> Unit) 
 }
 
 @Composable
-private fun OperatorMarker(p: LivePerson, selected: Boolean, isMe: Boolean) {
+private fun OperatorMarker(p: LivePerson, selected: Boolean, isMe: Boolean, photo: ImageBitmap?) {
     val ring = when {
         selected -> MapeColors.Red
         isMe -> MapeColors.Blue
@@ -629,8 +656,8 @@ private fun OperatorMarker(p: LivePerson, selected: Boolean, isMe: Boolean) {
         ) {
             Box(Modifier.size(avatarSize), contentAlignment = Alignment.Center) {
                 Avatar(initialsOf(p.name ?: p.nickname ?: "?"), avatarColor(p.id), size = avatarSize, border = 2.dp, borderColor = MapeColors.White)
-                if (!p.photoUrl.isNullOrBlank()) AsyncImage(
-                    model = p.photoUrl, contentDescription = "Foto de $label",
+                if (photo != null) Image(
+                    bitmap = photo, contentDescription = "Foto de $label",
                     modifier = Modifier.size(avatarSize - 3.dp).clip(CircleShape), contentScale = ContentScale.Crop,
                 )
             }
