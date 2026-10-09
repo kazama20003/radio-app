@@ -2,6 +2,7 @@ package com.syemape.radio.ui.screens
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -32,6 +33,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
@@ -204,33 +207,50 @@ fun MapScreen(topPadding: Dp) {
         // ---- Top fijo (no scrollea para que el mapa sea interactivo) ----
         Column(
             Modifier.padding(horizontal = 24.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Row(
-                Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween,
+            Box(
+                Modifier.fillMaxWidth().height(116.dp).clip(RoundedCornerShape(22.dp)),
             ) {
-                Avatar(initialsOf(user?.name ?: "?"), MapeColors.Red, size = 46.dp, border = 2.dp, borderColor = MapeColors.White)
-            }
-            Column {
+                Image(
+                    painter = painterResource(com.syemape.radio.R.drawable.map_header),
+                    contentDescription = "Camioneta MAPE en ruta",
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop,
+                )
                 Row(
-                    Modifier.fillMaxWidth(),
+                    Modifier.align(Alignment.CenterStart).padding(start = 12.dp),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
-                    Text("Hola, $firstName", color = MapeColors.TextSubtle, fontFamily = Outfit, fontSize = 15.sp)
-                    Row(
-                        Modifier.height(28.dp).clip(CircleShape).background(MapeColors.RedSoftBg).padding(horizontal = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    Box(
+                        Modifier.size(78.dp).clip(CircleShape).background(Color.Black.copy(alpha = 0.68f)).padding(5.dp),
+                        contentAlignment = Alignment.Center,
                     ) {
-                        Box(Modifier.size(7.dp).clip(CircleShape).background(MapeColors.Red))
-                        Text("$pending alertas", color = MapeColors.RedDark, fontFamily = Outfit, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                        Image(
+                            painter = painterResource(com.syemape.radio.R.drawable.mape_brand),
+                            contentDescription = "Logo de S&E MAPE",
+                            modifier = Modifier.fillMaxSize(),
+                            contentScale = ContentScale.Fit,
+                        )
+                    }
+                    Column(
+                        Modifier.clip(RoundedCornerShape(12.dp)).background(Color.Black.copy(alpha = 0.58f))
+                            .padding(horizontal = 10.dp, vertical = 7.dp),
+                    ) {
+                        Text("MAPA EN VIVO", color = Color.White, fontFamily = Outfit, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                        Text("Hola, $firstName", color = Color.White.copy(alpha = 0.9f), fontFamily = Outfit, fontSize = 11.sp)
                     }
                 }
-                Spacer(Modifier.height(4.dp))
-                Text("Operadores en ruta", color = MapeColors.Text, fontFamily = Outfit, fontWeight = FontWeight.Medium, fontSize = 30.sp)
+                Row(
+                    Modifier.align(Alignment.TopEnd).padding(10.dp).height(27.dp).clip(CircleShape)
+                        .background(Color.Black.copy(alpha = 0.68f)).padding(horizontal = 9.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(5.dp),
+                ) {
+                    Box(Modifier.size(6.dp).clip(CircleShape).background(MapeColors.Red))
+                    Text("$pending alertas", color = Color.White, fontFamily = Outfit, fontWeight = FontWeight.Bold, fontSize = 10.sp)
+                }
             }
             FilterRow(
                 listOf(
