@@ -62,6 +62,7 @@ object RadioManager {
     var normalDeviceLabel by mutableStateOf("Teléfono"); private set
     var audioLevel by mutableStateOf(0f); private set        // nivel de voz 0..1 (mueve la onda)
     var lastVoiceNote by mutableStateOf<RadioTransmission?>(null); private set // última nota de voz del canal
+    var catchingUpMessages by mutableStateOf(false); private set
     var netOnline by mutableStateOf(true); private set       // hay internet (ConnectivityManager)
 
     private val ui = CoroutineScope(SupervisorJob() + Dispatchers.Main)
@@ -107,6 +108,14 @@ object RadioManager {
     private val socket get() = Realtime.socket("/radio")
     private var radioConnectListener: Emitter.Listener? = null
     private var radioDisconnectListener: Emitter.Listener? = null
+    private val catchupFetchInProgress = AtomicBoolean(false)
+    private var catchupQueue: List<RadioTransmission> = emptyList()
+    private var catchupIndex = 0
+    private var catchupGeneration = 0
+    private var catchupChannelId: String? = null
+    private var catchupHasMore = false
+    private var catchupHistoryCursor: String? = null
+    private var catchupRetryCount = 0
 
     fun hasMicPermission(context: Context): Boolean =
         context.checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
@@ -263,7 +272,10 @@ object RadioManager {
             if (!o.has("transmission")) return@Listener
             val t = runCatching { Realtime.gson.fromJson(o.getJSONObject("transmission").toString(), RadioTransmission::class.java) }.getOrNull()
                 ?: return@Listener
-            if (!t.audioKey.isNullOrBlank()) ui.launch { lastVoiceNote = t }
+            if (!t.audioKey.isNullOrBlank()) ui.launch {
+                lastVoiceNote = t
+                if (Prefs.pendingVoiceCatchupChannel != channelId) channelId?.let { Prefs.saveRadioVoiceCursor(it, t.id) }
+            }
         })
         val onRadioConnect = Emitter.Listener {
             worker.execute {
@@ -283,13 +295,26 @@ object RadioManager {
                 channelId?.let { socket.emit("channel:join", it) }
                 runCatching { setupMediasoup() } // rearma transportes tras reconectar
                 syncImportantSubscriptionOnWorker(channels)
-                ui.launch { connected = isChannelReady() } // En vivo solo si el audio quedó listo
+                ui.launch {
+                    connected = isChannelReady() // En vivo solo si el audio quedó listo
+                    val cid = channelId
+                    if (cid != null) {
+                        for (attempt in 0 until 30) {
+                            if (connected) break
+                            delay(500)
+                        }
+                        recoverMissedVoiceNotes(cid)
+                    }
+                }
             }
         }
         radioConnectListener = onRadioConnect
         socket.on("connect", onRadioConnect)
         // El socket se cayó: refleja "desconectado" en la UI (ya no mentimos "En vivo").
-        val onRadioDisconnect = Emitter.Listener { ui.launch { connected = false } }
+        val onRadioDisconnect = Emitter.Listener {
+            channelId?.let(::markVoiceCatchupPending)
+            ui.launch { connected = false }
+        }
         radioDisconnectListener = onRadioDisconnect
         socket.on("disconnect", onRadioDisconnect)
         if (!socket.connected()) socket.connect()
@@ -331,6 +356,12 @@ object RadioManager {
 
     /** Entra a un canal YA: fija estado, se une por socket, marca EN LÍNEA y carga la última nota. */
     private fun enterChannelNow(app: Application, id: String, name: String) {
+        if (catchingUpMessages && catchupChannelId != id) {
+            catchupGeneration++
+            catchupQueue = emptyList()
+            catchingUpMessages = false
+            stopVoiceNote { }
+        }
         channelId = id
         channelName = name
         Prefs.lastChannelId = id
@@ -402,10 +433,16 @@ object RadioManager {
         }.getOrDefault(true)
         val cb = object : android.net.ConnectivityManager.NetworkCallback() {
             override fun onAvailable(network: android.net.Network) {
+                val cameBack = !netOnline
                 ui.launch { netOnline = true }
-                ensureSocketAlive() // al volver la red, reengancha el socket de inmediato
+                if (cameBack && Prefs.pendingVoiceCatchupChannel == channelId) {
+                    runCatching { socket.disconnect(); socket.connect() }
+                } else ensureSocketAlive() // al volver la red, reengancha el socket de inmediato
             }
-            override fun onLost(network: android.net.Network) { ui.launch { netOnline = false } }
+            override fun onLost(network: android.net.Network) {
+                channelId?.let(::markVoiceCatchupPending)
+                ui.launch { netOnline = false }
+            }
         }
         connectivityCb = cb
         runCatching { cm.registerDefaultNetworkCallback(cb) }
@@ -1415,8 +1452,136 @@ object RadioManager {
         ui.launch {
             val hist = runCatching { Backend.api.radioHistory(cid) }.getOrNull().orEmpty()
             val note = hist.firstOrNull { !it.audioKey.isNullOrBlank() }
-            if (channelId == cid) lastVoiceNote = note
+            if (channelId == cid) {
+                lastVoiceNote = note
+                if (Prefs.pendingVoiceCatchupChannel != cid) note?.id?.let { Prefs.saveRadioVoiceCursor(cid, it) }
+                if (Prefs.pendingVoiceCatchupChannel == cid && socket.connected()) recoverMissedVoiceNotes(cid)
+            }
         }
+    }
+
+    private fun markVoiceCatchupPending(cid: String) {
+        if (cid.isBlank() || Prefs.pendingVoiceCatchupChannel == cid) return
+        val cursor = Prefs.radioVoiceCursor(cid) ?: lastVoiceNote?.id
+        if (cursor.isNullOrBlank()) return
+        Prefs.pendingVoiceCatchupAfter = cursor
+        Prefs.pendingVoiceCatchupChannel = cid
+        android.util.Log.i("RadioTiming", "voice catch-up queued channel=$cid after=$cursor")
+    }
+
+    /** Descarga el historial que faltó durante la desconexión y lo reproduce en orden. */
+    private fun recoverMissedVoiceNotes(cid: String) {
+        if (cid != channelId || Prefs.pendingVoiceCatchupChannel != cid || !netOnline) return
+        if (!catchupFetchInProgress.compareAndSet(false, true)) return
+        ui.launch {
+            try {
+                var cursor = Prefs.pendingVoiceCatchupAfter ?: return@launch
+                val missed = mutableListOf<RadioTransmission>()
+                var pages = 0
+                var hasMore = false
+                var historyCursor = cursor
+                while (pages++ < 100) {
+                    val page = withContext(Dispatchers.IO) { Backend.api.radioHistoryAfter(cid, cursor, 100) }
+                    if (page.isEmpty()) { hasMore = false; break }
+                    page.filter { !it.audioKey.isNullOrBlank() }.forEach(missed::add)
+                    val next = page.lastOrNull()?.id ?: break
+                    if (next == cursor) break
+                    cursor = next
+                    historyCursor = next
+                    hasMore = page.size == 100
+                    if (!hasMore) break
+                }
+                if (cid != channelId || Prefs.pendingVoiceCatchupChannel != cid) return@launch
+                catchupChannelId = cid
+                catchupHasMore = hasMore
+                catchupHistoryCursor = historyCursor
+                catchupQueue = missed
+                catchupIndex = 0
+                catchupRetryCount = 0
+                catchupGeneration++
+                if (missed.isEmpty()) {
+                    if (hasMore) {
+                        Prefs.pendingVoiceCatchupAfter = historyCursor
+                        ui.launch { delay(250); recoverMissedVoiceNotes(cid) }
+                    } else finishVoiceCatchup(cid, historyCursor)
+                } else {
+                    catchingUpMessages = true
+                    RadioService.refresh(appRef)
+                    playCatchupNote(catchupGeneration, 0)
+                }
+            } catch (e: Exception) {
+                android.util.Log.w("RadioTiming", "voice catch-up failed; will retry on reconnect", e)
+            } finally {
+                catchupFetchInProgress.set(false)
+            }
+        }
+    }
+
+    private fun playCatchupNote(generation: Int, index: Int) {
+        if (generation != catchupGeneration || !catchingUpMessages) return
+        if (index >= catchupQueue.size) {
+            if (catchupHasMore) {
+                recoverMissedVoiceNotes(catchupChannelId ?: return)
+            } else finishVoiceCatchup(catchupChannelId ?: return, catchupHistoryCursor)
+            return
+        }
+        catchupIndex = index
+        val note = catchupQueue[index]
+        val url = mediaUrlOf(note.audioKey)
+        if (url == null) { playCatchupNote(generation, index + 1); return }
+        var completed = false
+        var retryScheduled = false
+        fun retryLater() {
+            if (retryScheduled) return
+            retryScheduled = true
+            ui.launch {
+                delay(900)
+                retryScheduled = false
+                if (!completed && generation == catchupGeneration && catchupIndex == index && catchingUpMessages) {
+                    playCatchupNote(generation, index)
+                }
+            }
+        }
+        playVoiceNote(
+            url = url,
+            id = note.id,
+            onCompletion = {
+                completed = true
+                ui.launch {
+                    if (generation != catchupGeneration || catchupIndex != index) return@launch
+                    Prefs.saveRadioVoiceCursor(note.channelId ?: catchupChannelId.orEmpty(), note.id)
+                    Prefs.pendingVoiceCatchupAfter = note.id
+                    catchupRetryCount = 0
+                    playCatchupNote(generation, index + 1)
+                }
+            },
+            onState = { state -> if (state == null) retryLater() },
+            onError = {
+                ui.launch {
+                    if (generation != catchupGeneration || catchupIndex != index) return@launch
+                    if (!netOnline || catchupRetryCount++ < 3) retryLater()
+                    else {
+                        completed = true
+                        Prefs.pendingVoiceCatchupAfter = note.id
+                        Prefs.saveRadioVoiceCursor(note.channelId ?: catchupChannelId.orEmpty(), note.id)
+                        playCatchupNote(generation, index + 1)
+                    }
+                }
+            },
+        )
+    }
+
+    private fun finishVoiceCatchup(cid: String, cursor: String?) {
+        cursor?.let { Prefs.saveRadioVoiceCursor(cid, it) }
+        if (Prefs.pendingVoiceCatchupChannel == cid) {
+            Prefs.pendingVoiceCatchupChannel = null
+            Prefs.pendingVoiceCatchupAfter = null
+        }
+        catchupQueue = emptyList()
+        catchupIndex = 0
+        catchingUpMessages = false
+        RadioService.refresh(appRef)
+        android.util.Log.i("RadioTiming", "voice catch-up complete channel=$cid")
     }
 
     /** Reproduce la última nota de voz del canal (con el enrutado de la radio). */
@@ -1435,6 +1600,7 @@ object RadioManager {
         id: String,
         onCompletion: (() -> Unit)? = null,
         onState: (String?) -> Unit,
+        onError: (() -> Unit)? = null,
     ) {
         if (notePlayingId == id) { stopVoiceNote(onState); return }
         if (talking || consuming || remoteProducerId != null || importantProducerIds.isNotEmpty()) {
@@ -1493,13 +1659,13 @@ object RadioManager {
             }
             mp.setOnErrorListener { _, _, _ ->
                 stopVoiceNote(onState)
-                onCompletion?.invoke()
+                if (onError != null) onError.invoke() else onCompletion?.invoke()
                 true
             }
             mp.prepareAsync()
         }.onFailure {
             stopVoiceNote(onState)
-            onCompletion?.invoke()
+            if (onError != null) onError.invoke() else onCompletion?.invoke()
         }
     }
 

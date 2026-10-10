@@ -24,6 +24,17 @@ object Prefs {
         get() = p?.getString("lastChannelName", null)
         set(v) { p?.edit()?.putString("lastChannelName", v)?.apply() }
 
+    fun radioVoiceCursor(channelId: String): String? = p?.getString("radioVoiceCursor:$channelId", null)
+    fun saveRadioVoiceCursor(channelId: String, transmissionId: String) {
+        p?.edit()?.putString("radioVoiceCursor:$channelId", transmissionId)?.apply()
+    }
+    var pendingVoiceCatchupChannel: String?
+        get() = p?.getString("pendingVoiceCatchupChannel", null)
+        set(value) { p?.edit()?.putString("pendingVoiceCatchupChannel", value)?.apply() }
+    var pendingVoiceCatchupAfter: String?
+        get() = p?.getString("pendingVoiceCatchupAfter", null)
+        set(value) { p?.edit()?.putString("pendingVoiceCatchupAfter", value)?.apply() }
+
     /** Canales importantes que este usuario quiere oír junto al canal seleccionado.
      * null conserva el comportamiento predeterminado: escuchar todos los importantes.
      */

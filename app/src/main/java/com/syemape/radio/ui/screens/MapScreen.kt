@@ -538,8 +538,13 @@ private fun MapPreview(
             if (routePoints.size >= 2) {
                 com.google.maps.android.compose.Polyline(
                     points = routePoints,
-                    color = MapeColors.Red,
-                    width = 14f,
+                    color = Color(0xFF4D1117),
+                    width = 20f,
+                )
+                com.google.maps.android.compose.Polyline(
+                    points = routePoints,
+                    color = Color(0xFFFF2638),
+                    width = 12f,
                 )
             }
             located.forEach { p ->

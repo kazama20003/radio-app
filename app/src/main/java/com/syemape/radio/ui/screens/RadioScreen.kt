@@ -194,6 +194,14 @@ fun RadioScreen(
                     )
                 }
             }
+            if (RadioManager.catchingUpMessages) {
+                Text(
+                    "Reconectado · reproduciendo las notas pendientes en orden…",
+                    color = RadioColors.TextMuted,
+                    fontFamily = Outfit,
+                    fontSize = 11.sp,
+                )
+            }
 
             Box(
                 Modifier.fillMaxWidth().height(46.dp).clip(RoundedCornerShape(14.dp))

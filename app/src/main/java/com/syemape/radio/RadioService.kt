@@ -169,6 +169,7 @@ class RadioService : Service() {
             )
             val talking = com.syemape.radio.data.RadioManager.talking
             val remoteSpeaking = com.syemape.radio.data.RadioManager.remoteSpeaking
+            val catchingUp = com.syemape.radio.data.RadioManager.catchingUpMessages
             val speaker = com.syemape.radio.data.RadioManager.speakerLabel?.takeIf { it.isNotBlank() }
             return NotificationCompat.Builder(context, CHANNEL_ID)
                 .setSmallIcon(com.syemape.radio.R.drawable.ic_stat_radio)
@@ -177,6 +178,7 @@ class RadioService : Service() {
                 .setContentTitle(channelText)
                 .setContentText(
                     when {
+                        catchingUp -> "▶ Reproduciendo notas anteriores del canal"
                         talking -> "🔴 Transmitiendo… toca Cortar para terminar"
                         remoteSpeaking -> "🔊 ${speaker ?: "Alguien"} está hablando"
                         else -> "Radio en vivo · toca Hablar para transmitir"
