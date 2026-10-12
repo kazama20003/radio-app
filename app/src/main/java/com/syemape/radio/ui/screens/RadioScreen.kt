@@ -71,6 +71,8 @@ import androidx.compose.ui.unit.sp
 import com.syemape.radio.data.RadioManager
 import com.syemape.radio.data.Backend
 import com.syemape.radio.data.CreateRadioChannelRequest
+import com.syemape.radio.data.CreateConversationRequest
+import com.syemape.radio.data.UpdateRadioChannelRequest
 import com.syemape.radio.data.SessionManager
 import com.syemape.radio.ui.MapeIcons
 import com.syemape.radio.ui.pressScale
@@ -93,6 +95,7 @@ fun RadioScreen(
     topPadding: Dp,
     bottomPadding: Dp = 0.dp,
     onOpenChannelChat: (String, String) -> Unit = { _, _ -> },
+    onOpenPrivateChat: (String, String) -> Unit = { _, _ -> },
     onOpenSettings: () -> Unit = {},
 ) {
     val context = LocalContext.current
@@ -106,6 +109,10 @@ fun RadioScreen(
     var channelImportant by remember { mutableStateOf(false) }
     var creatingChannel by remember { mutableStateOf(false) }
     var createChannelError by remember { mutableStateOf<String?>(null) }
+    var showEditChannel by remember { mutableStateOf(false) }
+    var channelNameEditDraft by remember { mutableStateOf("") }
+    var editingChannel by remember { mutableStateOf(false) }
+    var editChannelError by remember { mutableStateOf<String?>(null) }
     val app = context.applicationContext as android.app.Application
     val micLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
         androidx.activity.result.contract.ActivityResultContracts.RequestPermission(),
@@ -152,6 +159,19 @@ fun RadioScreen(
                         Text("Sin canales disponibles", color = RadioColors.TextMuted, fontFamily = Outfit, fontSize = 12.sp)
                     }
                 }
+                if (isAdmin && RadioManager.channelId != null) {
+                    Box(
+                        Modifier.size(34.dp).clip(CircleShape).background(RadioColors.Card)
+                            .border(1.dp, RadioColors.Border, CircleShape)
+                            .clickable {
+                                val current = RadioManager.channels.firstOrNull { it.id == RadioManager.channelId }
+                                channelNameEditDraft = current?.name.orEmpty()
+                                editChannelError = null
+                                showEditChannel = true
+                            },
+                        contentAlignment = Alignment.Center,
+                    ) { Text("✎", color = RadioColors.Text, fontFamily = Outfit, fontSize = 18.sp) }
+                }
                 if (RadioManager.channels.size > 1) {
                     Box(
                         Modifier.size(34.dp).clip(CircleShape).background(RadioColors.Card)
@@ -172,7 +192,19 @@ fun RadioScreen(
                 }
             }
 
-            RadioMemberCard()
+            RadioMemberCard { user ->
+                val myId = SessionManager.user?.id
+                if (user.id.isNotBlank() && user.id != myId) scope.launch {
+                    runCatching {
+                        Backend.api.createConversation(CreateConversationRequest(type = "DIRECT", memberIds = listOf(user.id)))
+                    }.onSuccess { convo ->
+                        val label = user.nickname?.takeIf { it.isNotBlank() } ?: user.name ?: "Chat privado"
+                        onOpenPrivateChat(convo.id, label)
+                    }.onFailure {
+                        android.widget.Toast.makeText(context, "No se pudo abrir el chat privado", android.widget.Toast.LENGTH_SHORT).show()
+                    }
+                }
+            }
 
             val lastNote = RadioManager.lastVoiceNote
             var lastPlaying by remember { mutableStateOf(false) }
@@ -188,21 +220,12 @@ fun RadioScreen(
                 if (lastNote != null) {
                     RadioActionCard(
                         icon = if (lastPlaying) MapeIcons.Pause else MapeIcons.Play,
-                        label = if (lastPlaying) "Pausar nota" else "Última nota · ${lastNote.durationSec?.toInt() ?: 0}s",
+                        label = if (lastPlaying) "Pausar notas" else "3 notas recientes",
                         modifier = Modifier.weight(1.35f),
-                        onClick = { RadioManager.playLastVoiceNote { id -> lastPlaying = id != null } },
+                        onClick = { RadioManager.playLastThreeVoiceNotes { id -> lastPlaying = id != null } },
                     )
                 }
             }
-            if (RadioManager.catchingUpMessages) {
-                Text(
-                    "Reconectado · reproduciendo las notas pendientes en orden…",
-                    color = RadioColors.TextMuted,
-                    fontFamily = Outfit,
-                    fontSize = 11.sp,
-                )
-            }
-
             Box(
                 Modifier.fillMaxWidth().height(46.dp).clip(RoundedCornerShape(14.dp))
                     .background(RadioColors.Card).border(1.dp, RadioColors.Border, RoundedCornerShape(18.dp))
@@ -249,6 +272,45 @@ fun RadioScreen(
                 // pushing the microphone below the bottom navigation bar.
                 val micSize = minOf(maxWidth, maxHeight, 250.dp)
                 if (micSize > 0.dp) HoldTalkButton(size = micSize)
+            }
+        }
+    }
+
+    if (showEditChannel && isAdmin) {
+        Dialog(onDismissRequest = { if (!editingChannel) showEditChannel = false }) {
+            Column(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(22.dp)).background(RadioColors.Card)
+                    .border(1.dp, RadioColors.Border, RoundedCornerShape(22.dp)).padding(20.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Text("Editar nombre del canal", color = RadioColors.Text, fontFamily = Outfit, fontWeight = FontWeight.Bold, fontSize = 20.sp)
+                OutlinedTextField(
+                    value = channelNameEditDraft,
+                    onValueChange = { channelNameEditDraft = it; editChannelError = null },
+                    modifier = Modifier.fillMaxWidth(), label = { Text("Nombre") }, singleLine = true,
+                    colors = OutlinedTextFieldDefaults.colors(focusedTextColor = RadioColors.Text, unfocusedTextColor = RadioColors.Text,
+                        focusedLabelColor = RadioColors.Ink, unfocusedLabelColor = RadioColors.TextMuted,
+                        focusedBorderColor = RadioColors.Ink, unfocusedBorderColor = RadioColors.Border),
+                )
+                editChannelError?.let { Text(it, color = Color(0xFFFF7777), fontFamily = Outfit, fontSize = 12.sp) }
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
+                    Text("Cancelar", Modifier.clickable(enabled = !editingChannel) { showEditChannel = false }.padding(12.dp), color = RadioColors.TextMuted, fontFamily = Outfit)
+                    Text(if (editingChannel) "Guardando…" else "Guardar", Modifier.clip(CircleShape).background(RadioColors.Ink).clickable(enabled = !editingChannel) {
+                        val id = RadioManager.channelId
+                        val name = channelNameEditDraft.trim()
+                        if (id == null) editChannelError = "Selecciona un canal."
+                        else if (name.isBlank()) editChannelError = "Escribe un nombre."
+                        else {
+                            editingChannel = true
+                            scope.launch {
+                                runCatching { Backend.api.updateRadioChannel(id, UpdateRadioChannelRequest(name)) }
+                                    .onSuccess { RadioManager.reloadChannels(); showEditChannel = false }
+                                    .onFailure { editChannelError = "No se pudo actualizar el canal." }
+                                editingChannel = false
+                            }
+                        }
+                    }.padding(horizontal = 18.dp, vertical = 10.dp), color = RadioColors.White, fontFamily = Outfit, fontWeight = FontWeight.Bold)
+                }
             }
         }
     }
@@ -439,13 +501,8 @@ private fun RadioHero(topPadding: Dp, onOpenSettings: () -> Unit, compact: Boole
 }
 
 @Composable
-private fun RadioMemberCard() {
+private fun RadioMemberCard(onUserClick: (com.syemape.radio.data.MiniUser) -> Unit) {
     val users = RadioManager.connectedUsers
-    val aliases = users.map { user ->
-        user.nickname?.trim()?.takeIf { it.isNotEmpty() }
-            ?: user.name?.trim()?.takeIf { it.isNotEmpty() }
-            ?: "Operador"
-    }
     Row(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(15.dp)).background(RadioColors.Card)
             .border(1.dp, RadioColors.Border, RoundedCornerShape(15.dp)).padding(horizontal = 10.dp, vertical = 5.dp),
@@ -458,7 +515,7 @@ private fun RadioMemberCard() {
                 "${RadioManager.members} CONECTADOS · ${if (RadioManager.connected) "EN VIVO" else "CONECTANDO"}",
                 color = RadioColors.TextMuted, fontFamily = Outfit, fontWeight = FontWeight.Bold, fontSize = 9.sp, maxLines = 1,
             )
-            if (aliases.isEmpty()) {
+            if (users.isEmpty()) {
                 Text("Esperando conectados…", color = RadioColors.TextMuted, fontFamily = Outfit, fontWeight = FontWeight.SemiBold, fontSize = 10.sp, maxLines = 1)
             } else {
                 LazyRow(
@@ -466,7 +523,12 @@ private fun RadioMemberCard() {
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    items(aliases) { alias -> ConnectedAlias(alias) }
+                    items(users, key = { it.id }) { user ->
+                        val alias = user.nickname?.trim()?.takeIf { it.isNotEmpty() }
+                            ?: user.name?.trim()?.takeIf { it.isNotEmpty() }
+                            ?: "Operador"
+                        ConnectedAlias(alias, Modifier.clickable { onUserClick(user) })
+                    }
                 }
             }
         }
@@ -474,9 +536,9 @@ private fun RadioMemberCard() {
 }
 
 @Composable
-private fun ConnectedAlias(alias: String) {
+private fun ConnectedAlias(alias: String, modifier: Modifier = Modifier) {
     Row(
-        Modifier.clip(CircleShape).background(RadioColors.Ink.copy(alpha = 0.12f))
+        modifier.clip(CircleShape).background(RadioColors.Ink.copy(alpha = 0.12f))
             .padding(horizontal = 8.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(5.dp),

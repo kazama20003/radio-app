@@ -83,6 +83,9 @@ interface ApiService {
     @POST("radio/channels")
     suspend fun createRadioChannel(@Body body: CreateRadioChannelRequest): RadioChannel
 
+    @PATCH("radio/channels/{id}")
+    suspend fun updateRadioChannel(@Path("id") id: String, @Body body: UpdateRadioChannelRequest): RadioChannel
+
     @GET("radio/channels/{id}/history")
     suspend fun radioHistory(
         @Path("id") id: String,
@@ -90,15 +93,11 @@ interface ApiService {
         @retrofit2.http.Query("before") before: String? = null,
     ): List<RadioTransmission>
 
-    @GET("radio/channels/{id}/history")
-    suspend fun radioHistoryAfter(
-        @Path("id") id: String,
-        @retrofit2.http.Query("after") after: String,
-        @retrofit2.http.Query("limit") limit: Int = 50,
-    ): List<RadioTransmission>
-
     @GET("conversations")
     suspend fun conversations(): List<Conversation>
+
+    @POST("conversations")
+    suspend fun createConversation(@Body body: CreateConversationRequest): Conversation
 
     @GET("conversations/{id}")
     suspend fun conversation(@Path("id") id: String): ConversationDetail

@@ -140,6 +140,13 @@ data class ConversationDetail(
 data class SendMessageRequest(
     val type: String = "TEXT",
     val body: String? = null,
+    val attachmentKey: String? = null,
+    val durationSec: Int? = null,
+)
+
+data class CreateConversationRequest(
+    val type: String = "DIRECT",
+    val memberIds: List<String>,
 )
 
 data class AppSetting(
@@ -191,6 +198,8 @@ data class CreateRadioChannelRequest(
     val description: String? = null,
     val isImportant: Boolean = false,
 )
+
+data class UpdateRadioChannelRequest(val name: String)
 
 /** Transmisión del chat de un canal de radio (voz, imagen o texto). */
 data class RadioTransmission(

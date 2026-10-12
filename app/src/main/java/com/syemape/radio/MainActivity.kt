@@ -208,6 +208,7 @@ private fun AppRoot(onDarkModeChanged: (Boolean) -> Unit) {
                         topInset,
                         bottomInset,
                         onOpenChannelChat = { id, name -> openChannelChat = id to name },
+                        onOpenPrivateChat = { id, name -> openChat = id to name },
                         onOpenSettings = { openSub = "settings" },
                     )
                     Tab.Chats -> ChatsScreen(
