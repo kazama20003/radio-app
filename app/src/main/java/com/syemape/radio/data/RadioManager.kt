@@ -86,6 +86,11 @@ object RadioManager {
     private val consumerChannelIds = ConcurrentHashMap<String, String>()
     private val consumingProducerIds = ConcurrentHashMap.newKeySet<String>()
     var channelId: String? = null; private set
+    var privateRadioMode by mutableStateOf(false); private set
+    var privateRadioPeerName by mutableStateOf<String?>(null); private set
+    @Volatile private var returnChannelId: String? = null
+    @Volatile private var returnChannelName: String? = null
+    @Volatile private var privateScopeJoined = false
     @Volatile private var remoteProducerId: String? = null
     @Volatile private var importantChannelIds: Set<String> = emptySet()
     private val importantChannelNames = ConcurrentHashMap<String, String>()
@@ -282,7 +287,14 @@ object RadioManager {
                 importantProducerIds.clear()
                 importantSpeakerAliases.clear()
                 ui.launch { talking = false }
-                channelId?.let { socket.emit("channel:join", it) }
+                if (privateRadioMode) {
+                    val activeScope = channelId
+                    privateScopeJoined = false
+                    val joined = activeScope?.let { ack("channel:join", it, 3000) as? JSONObject }
+                    privateScopeJoined = joined?.optString("joined") == activeScope
+                } else {
+                    channelId?.let { socket.emit("channel:join", it) }
+                }
                 runCatching { setupMediasoup() } // rearma transportes tras reconectar
                 syncImportantSubscriptionOnWorker(channels)
                 ui.launch {
@@ -500,6 +512,15 @@ object RadioManager {
 
     private fun syncImportantSubscriptionOnWorker(availableChannels: List<RadioChannel>) {
         if (!started || !socket.connected()) return
+        if (privateRadioMode) {
+            runCatching { socket.emit("channel:unlisten-important", JSONObject()) }
+            importantChannelIds.forEach { closeConsumersForChannel(it) }
+            importantChannelIds = emptySet()
+            importantChannelNames.clear()
+            importantProducerIds.clear()
+            importantSpeakerAliases.clear()
+            return
+        }
         // Start with every active channel selected; users can then turn each one
         // off independently. Versioned preference avoids carrying the old one-channel selection.
         val availableChannelIds = availableChannels.mapTo(mutableSetOf()) { it.id }
@@ -551,6 +572,48 @@ object RadioManager {
     }
 
     fun selectChannel(id: String) {
+        switchRadioScope(id, channels.firstOrNull { it.id == id }?.let {
+            listOfNotNull(it.name, it.description).joinToString(" · ").ifBlank { "Canal" }
+        } ?: channelName, persist = true, restoreImportant = true)
+    }
+
+    /** Entra a una sala PTT privada asociada a una conversación DIRECT. */
+    fun enterPrivateRadio(conversationId: String, peerName: String) {
+        if (conversationId.isBlank()) return
+        if (!privateRadioMode) {
+            returnChannelId = channelId
+            returnChannelName = channelName
+        }
+        privateRadioMode = true
+        privateScopeJoined = false
+        connected = false
+        privateRadioPeerName = peerName
+        socket.emit("channel:unlisten-important", JSONObject())
+        switchRadioScope("private:$conversationId", "Privado · $peerName", persist = false, restoreImportant = false)
+    }
+
+    /** Vuelve al canal que estaba seleccionado antes de abrir la radio privada. */
+    fun exitPrivateRadio() {
+        if (!privateRadioMode) return
+        val fallbackChannel = channels.firstOrNull { it.joined } ?: channels.firstOrNull()
+        val id = returnChannelId ?: fallbackChannel?.id
+        val name = returnChannelName ?: fallbackChannel?.let {
+            listOfNotNull(it.name, it.description).joinToString(" · ").ifBlank { "Canal" }
+        }
+        privateRadioMode = false
+        privateScopeJoined = false
+        privateRadioPeerName = null
+        returnChannelId = null
+        returnChannelName = null
+        if (id != null) switchRadioScope(id, name ?: "Canal", persist = true, restoreImportant = true)
+        else {
+            channelId?.let { socket.emit("channel:leave", it) }
+            channelId = null
+            connected = false
+        }
+    }
+
+    private fun switchRadioScope(id: String, name: String, persist: Boolean, restoreImportant: Boolean) {
         if (id == channelId || id.isBlank()) return
         if (recentVoiceQueue.isNotEmpty()) {
             recentVoiceGeneration++
@@ -560,14 +623,19 @@ object RadioManager {
         val prev = channelId
         // UI instantánea (en el hilo que llama, normalmente Main)
         channelId = id
-        Prefs.lastChannelId = id
-        channels.firstOrNull { it.id == id }?.let { ch ->
-            channelName = listOfNotNull(ch.name, ch.description).joinToString(" · ").ifBlank { "Canal" }
-            Prefs.lastChannelName = channelName
+        channelName = name
+        if (persist) {
+            Prefs.lastChannelId = id
+            Prefs.lastChannelName = name
+        }
+        if (persist) {
             // Yo, al instante; la presencia del canal nuevo completa el resto.
             val me = meUser()
             connectedUsers = me?.let { listOf(it) } ?: emptyList()
             members = if (me != null) 1 else 0
+        } else {
+            connectedUsers = emptyList()
+            members = 0
         }
         val wasTalking = talking
         remoteProducerId = null
@@ -581,18 +649,31 @@ object RadioManager {
         // última nota del canal nuevo llegan al instante, sin esperar a un ack que puede
         // tardar. Antes esto iba en el worker y, si estaba ocupado, el cambio tardaba.
         runCatching { prev?.let { socket.emit("channel:leave", it) } }
-        runCatching { socket.emit("channel:join", id) }
-        refreshLastVoiceNote(id)
+        if (persist) runCatching { socket.emit("channel:join", id) }
+        if (persist) refreshLastVoiceNote(id) else lastVoiceNote = null
         // Audio (cerrar lo viejo + consumir al hablante del nuevo) en 2º plano: no bloquea
         // la sensación de "conectado" (los transportes persisten → seguimos EN VIVO).
         worker.execute {
             prev?.let { closeConsumersForChannel(it) }
             runCatching { producer?.close() }; producer = null
             if (wasTalking) runCatching { socket.emit("ms:closeProducer") }
+            if (!restoreImportant) {
+                importantChannelIds.forEach { closeConsumersForChannel(it) }
+                importantChannelIds = emptySet()
+                importantChannelNames.clear()
+                importantProducerIds.clear()
+                importantSpeakerAliases.clear()
+            }
+            if (!persist) {
+                val joined = ack("channel:join", id, 3000) as? JSONObject
+                privateScopeJoined = joined?.optString("joined") == id
+                if (!privateScopeJoined) android.util.Log.w(TAG, "No se confirmó la unión a la radio privada")
+            }
             val cur = ack("ms:getProducer", JSONObject().put("channelId", id)) as? JSONObject
             val curProducer = cur?.optString("producerId")?.takeIf { it.isNotEmpty() }
             if (curProducer != null) consume(curProducer, cur?.let { speakerAliasFrom(it) } ?: "Alguien del canal", id)
-            syncImportantSubscriptionOnWorker(channels)
+            if (restoreImportant) syncImportantSubscriptionOnWorker(channels)
+            ui.launch { connected = isChannelReady(); RadioService.refresh(appRef) }
         }
     }
 
@@ -1086,7 +1167,7 @@ object RadioManager {
 
     /** El canal está realmente listo para transmitir (socket + ambos transportes). */
     fun isChannelReady(): Boolean =
-        socket.connected() && sendTransport != null && recvTransport != null
+        socket.connected() && sendTransport != null && recvTransport != null && (!privateRadioMode || privateScopeJoined)
 
     /** Reconecta el socket y rearma los transportes de audio (SIN transmitir). */
     private fun reconnectAndSetup() {

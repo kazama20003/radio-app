@@ -36,6 +36,7 @@ import com.syemape.radio.ui.screens.ChatsScreen
 import com.syemape.radio.ui.screens.LoginScreen
 import com.syemape.radio.ui.screens.MapScreen
 import com.syemape.radio.ui.screens.ProfileScreen
+import com.syemape.radio.ui.screens.PrivateRadioScreen
 import com.syemape.radio.ui.screens.RadioScreen
 import com.syemape.radio.ui.theme.MapeColors
 import com.syemape.radio.ui.theme.MapeTheme
@@ -90,6 +91,7 @@ private fun AppRoot(onDarkModeChanged: (Boolean) -> Unit) {
     var error by remember { mutableStateOf<String?>(null) }
     var openChat by remember { mutableStateOf<Pair<String, String>?>(null) }
     var openChannelChat by remember { mutableStateOf<Pair<String, String>?>(null) }
+    var openPrivateRadio by remember { mutableStateOf<Pair<String, String>?>(null) }
     var openSub by remember { mutableStateOf<String?>(null) }
 
     when (SessionManager.status) {
@@ -121,6 +123,7 @@ private fun AppRoot(onDarkModeChanged: (Boolean) -> Unit) {
           BackHandler(enabled = true) {
               when {
                   openSub != null -> openSub = null
+                  openPrivateRadio != null -> openPrivateRadio = null
                   openChannelChat != null -> openChannelChat = null
                   openChat != null -> openChat = null
                   tab != Tab.Mapa -> {
@@ -176,6 +179,7 @@ private fun AppRoot(onDarkModeChanged: (Boolean) -> Unit) {
           Box(Modifier.fillMaxSize().background(MapeColors.Bg)) {
             val chat = openChat
             val channelChat = openChannelChat
+            val privateRadio = openPrivateRadio
             val sub = openSub
             if (sub != null) {
                 when (sub) {
@@ -185,6 +189,13 @@ private fun AppRoot(onDarkModeChanged: (Boolean) -> Unit) {
                     "admin-users" -> com.syemape.radio.ui.screens.AdminUsersScreen(topInset) { openSub = null }
                     else -> { openSub = null }
                 }
+            } else if (privateRadio != null) {
+                PrivateRadioScreen(
+                    conversationId = privateRadio.first,
+                    peerName = privateRadio.second,
+                    topPadding = topInset,
+                    onBack = { openPrivateRadio = null },
+                )
             } else if (channelChat != null) {
                 com.syemape.radio.ui.screens.ChannelChatScreen(
                     channelId = channelChat.first,
@@ -208,7 +219,7 @@ private fun AppRoot(onDarkModeChanged: (Boolean) -> Unit) {
                         topInset,
                         bottomInset,
                         onOpenChannelChat = { id, name -> openChannelChat = id to name },
-                        onOpenPrivateChat = { id, name -> openChat = id to name },
+                        onOpenPrivateRadio = { id, name -> openPrivateRadio = id to name },
                         onOpenSettings = { openSub = "settings" },
                     )
                     Tab.Chats -> ChatsScreen(

@@ -95,7 +95,7 @@ fun RadioScreen(
     topPadding: Dp,
     bottomPadding: Dp = 0.dp,
     onOpenChannelChat: (String, String) -> Unit = { _, _ -> },
-    onOpenPrivateChat: (String, String) -> Unit = { _, _ -> },
+    onOpenPrivateRadio: (String, String) -> Unit = { _, _ -> },
     onOpenSettings: () -> Unit = {},
 ) {
     val context = LocalContext.current
@@ -198,10 +198,10 @@ fun RadioScreen(
                     runCatching {
                         Backend.api.createConversation(CreateConversationRequest(type = "DIRECT", memberIds = listOf(user.id)))
                     }.onSuccess { convo ->
-                        val label = user.nickname?.takeIf { it.isNotBlank() } ?: user.name ?: "Chat privado"
-                        onOpenPrivateChat(convo.id, label)
+                        val label = user.nickname?.takeIf { it.isNotBlank() } ?: user.name ?: "Usuario"
+                        onOpenPrivateRadio(convo.id, label)
                     }.onFailure {
-                        android.widget.Toast.makeText(context, "No se pudo abrir el chat privado", android.widget.Toast.LENGTH_SHORT).show()
+                        android.widget.Toast.makeText(context, "No se pudo abrir la radio privada", android.widget.Toast.LENGTH_SHORT).show()
                     }
                 }
             }
@@ -271,7 +271,7 @@ fun RadioScreen(
                 // Phones with a short display get a smaller PTT target instead of
                 // pushing the microphone below the bottom navigation bar.
                 val micSize = minOf(maxWidth, maxHeight, 250.dp)
-                if (micSize > 0.dp) HoldTalkButton(size = micSize)
+                if (micSize > 0.dp) RadioPushToTalkButton(size = micSize)
             }
         }
     }
@@ -619,7 +619,7 @@ private fun RadioSpeakerStatus() {
 }
 
 @Composable
-private fun HoldTalkButton(size: Dp) {
+fun RadioPushToTalkButton(size: Dp) {
     val talking = RadioManager.talking
     val ready = RadioManager.connected // true solo cuando el canal de audio está listo
     val brandRed = Color(0xFFD71920)

@@ -63,10 +63,6 @@ fun ChatDetailScreen(conversationId: String, title: String, topPadding: Dp, bott
     var loading by remember { mutableStateOf(true) }
     var draft by remember { mutableStateOf("") }
     var sending by remember { mutableStateOf(false) }
-    var recording by remember { mutableStateOf(false) }
-    var recorder by remember { mutableStateOf<android.media.MediaRecorder?>(null) }
-    var recordingFile by remember { mutableStateOf<File?>(null) }
-    var recordingStartedAt by remember { mutableStateOf(0L) }
     var playingVoiceId by remember { mutableStateOf<String?>(null) }
     val listState = rememberLazyListState()
 
@@ -79,17 +75,6 @@ fun ChatDetailScreen(conversationId: String, title: String, topPadding: Dp, bott
                 com.syemape.radio.data.AppBadges.refresh()
             }
         loading = false
-    }
-
-    androidx.compose.runtime.DisposableEffect(recorder) {
-        val activeRecorder = recorder
-        onDispose {
-            if (activeRecorder != null) {
-                runCatching { activeRecorder.stop() }
-                runCatching { activeRecorder.release() }
-                recordingFile?.delete()
-            }
-        }
     }
 
     // Recepción en vivo por Socket.IO: une a la sala y escucha message:new.
@@ -114,69 +99,6 @@ fun ChatDetailScreen(conversationId: String, title: String, topPadding: Dp, bott
     // Autoscroll al final cuando cambian los mensajes.
     LaunchedEffect(messages.size) {
         if (messages.isNotEmpty()) listState.animateScrollToItem(messages.size - 1)
-    }
-
-    fun startVoiceRecording() {
-        runCatching {
-            val file = File.createTempFile("private-voice-", ".m4a", context.cacheDir)
-            val media = android.media.MediaRecorder()
-            media.setAudioSource(android.media.MediaRecorder.AudioSource.MIC)
-            media.setOutputFormat(android.media.MediaRecorder.OutputFormat.MPEG_4)
-            media.setAudioEncoder(android.media.MediaRecorder.AudioEncoder.AAC)
-            media.setAudioEncodingBitRate(64000)
-            media.setAudioSamplingRate(24000)
-            media.setOutputFile(file.absolutePath)
-            media.prepare()
-            media.start()
-            recordingFile = file
-            recordingStartedAt = android.os.SystemClock.elapsedRealtime()
-            recorder = media
-            recording = true
-        }.onFailure {
-            runCatching { recorder?.release() }
-            recorder = null
-            recordingFile?.delete()
-            recordingFile = null
-            android.widget.Toast.makeText(context, "No se pudo iniciar la grabación", android.widget.Toast.LENGTH_SHORT).show()
-        }
-    }
-
-    fun stopAndSendVoice() {
-        val media = recorder
-        val file = recordingFile
-        recorder = null
-        recordingFile = null
-        recording = false
-        if (media == null || file == null) return
-        val duration = ((android.os.SystemClock.elapsedRealtime() - recordingStartedAt) / 1000L).toInt().coerceAtLeast(1)
-        runCatching { media.stop() }.onFailure {
-            runCatching { media.release() }; file.delete()
-            return
-        }
-        runCatching { media.release() }
-        if (file.length() < 500L) {
-            file.delete()
-            return
-        }
-        sending = true
-        scope.launch {
-            try {
-                val upload = MediaUploader.upload(
-                    context,
-                    PickedFile(android.net.Uri.fromFile(file), file.name, file.length(), "audio/mp4"),
-                )
-                val sent = Backend.api.sendMessage(
-                    conversationId,
-                    SendMessageRequest(type = "VOICE", attachmentKey = upload.key, durationSec = duration),
-                )
-                if (messages.none { it.id == sent.id }) messages.add(sent)
-            } catch (_: Exception) {
-                android.widget.Toast.makeText(context, "No se pudo enviar la nota de voz", android.widget.Toast.LENGTH_SHORT).show()
-            } finally {
-                file.delete()
-                sending = false
-            }
-        }
     }
 
     Column(Modifier.fillMaxSize().background(MapeColors.Bg)) {
@@ -254,17 +176,10 @@ fun ChatDetailScreen(conversationId: String, title: String, topPadding: Dp, bott
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             Box(
-                Modifier.size(58.dp).clip(CircleShape).background(if (recording) MapeColors.Red else MapeColors.Ink)
-                    .pressScale(enabled = !sending) { if (recording) stopAndSendVoice() else startVoiceRecording() },
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(MapeIcons.Mic, if (recording) "Detener y enviar" else "Grabar nota de voz", tint = MapeColors.White, modifier = Modifier.size(29.dp))
-            }
-            Box(
                 Modifier.weight(1f).height(48.dp).clip(CircleShape).background(MapeColors.Bg).padding(horizontal = 16.dp),
                 contentAlignment = Alignment.CenterStart,
             ) {
-                if (draft.isEmpty()) Text(if (recording) "Grabando… toca el micrófono para enviar" else "Mensaje…", color = MapeColors.TextFaint, fontFamily = Outfit, fontSize = 15.sp)
+                if (draft.isEmpty()) Text("Mensaje…", color = MapeColors.TextFaint, fontFamily = Outfit, fontSize = 15.sp)
                 BasicTextField(
                     value = draft,
                     onValueChange = { draft = it.take(2000) },
