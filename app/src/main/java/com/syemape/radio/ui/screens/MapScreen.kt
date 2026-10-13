@@ -124,7 +124,7 @@ private fun isValidCoordinate(lat: Double?, lng: Double?): Boolean =
         lat in -90.0..90.0 && lng in -180.0..180.0
 
 @Composable
-fun MapScreen(topPadding: Dp) {
+fun MapScreen(topPadding: Dp, bottomPadding: Dp = 0.dp) {
     var filter by remember { mutableIntStateOf(0) }
     var selectedId by remember { mutableStateOf<String?>(null) }
     val user = SessionManager.user
@@ -211,7 +211,8 @@ fun MapScreen(topPadding: Dp) {
     val selectedPerson = people.firstOrNull { it.id == selectedId }
 
     Column(
-        modifier = Modifier.fillMaxSize().background(MapeColors.Bg).padding(top = topPadding + 20.dp),
+        modifier = Modifier.fillMaxSize().background(MapeColors.Bg)
+            .padding(top = topPadding + 8.dp, bottom = bottomPadding + 78.dp),
     ) {
         // ---- Top fijo (no scrollea para que el mapa sea interactivo) ----
         Column(

@@ -733,7 +733,10 @@ object RadioManager {
         // Salir/entrar al canal YA (NO dentro del hilo de audio): así la presencia y la
         // última nota del canal nuevo llegan al instante, sin esperar a un ack que puede
         // tardar. Antes esto iba en el worker y, si estaba ocupado, el cambio tardaba.
-        runCatching { prev?.let { socket.emit("channel:leave", it) } }
+        // La radio privada usa su propia sala PTT, pero la presencia del canal
+        // público debe seguir activa para que el usuario no desaparezca de allí.
+        val keepPublicMembership = id.startsWith("private:") && prev != null && !prev.startsWith("private:")
+        if (!keepPublicMembership) runCatching { prev?.let { socket.emit("channel:leave", it) } }
         if (persist) runCatching { socket.emit("channel:join", id) }
         if (persist) refreshLastVoiceNote(id) else lastVoiceNote = null
         // Audio (cerrar lo viejo + consumir al hablante del nuevo) en 2º plano: no bloquea

@@ -28,6 +28,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.syemape.radio.ui.theme.MapeColors
 import com.syemape.radio.ui.theme.Outfit
+import com.syemape.radio.data.RadioManager
 
 enum class Tab(val label: String, val icon: ImageVector) {
     Mapa("Mapa", MapeIcons.Pin),
@@ -42,8 +43,8 @@ fun BottomNav(active: Tab, modifier: Modifier = Modifier, onSelect: (Tab) -> Uni
     Row(
         modifier
             .fillMaxWidth()
-            .padding(horizontal = 20.dp)
-            .height(68.dp)
+            .padding(horizontal = 28.dp)
+            .height(64.dp)
             .clip(RoundedCornerShape(34.dp))
             .background(MapeColors.Ink)
             .padding(6.dp),
@@ -54,7 +55,7 @@ fun BottomNav(active: Tab, modifier: Modifier = Modifier, onSelect: (Tab) -> Uni
             val badge = if (tab == Tab.Chats) com.syemape.radio.data.AppBadges.unreadChats else 0
             val dot = tab == Tab.Alertas && com.syemape.radio.data.AppBadges.pendingAlerts > 0
             Box(
-                modifier = (if (isActive) Modifier.weight(1f) else Modifier.width(54.dp))
+                modifier = (if (isActive) Modifier.weight(1f) else Modifier.width(48.dp))
                     .fillMaxHeight()
                     .pressScale { onSelect(tab) },
                 contentAlignment = Alignment.Center,
@@ -74,12 +75,29 @@ fun BottomNav(active: Tab, modifier: Modifier = Modifier, onSelect: (Tab) -> Uni
                             tab.icon,
                             null,
                             tint = if (isActive) MapeColors.Ink else MapeColors.White,
-                            modifier = Modifier.size(if (isActive) 20.dp else 22.dp),
+                            modifier = Modifier.size(if (isActive) 18.dp else 21.dp),
                         )
                     }
                     if (isActive) {
-                        Spacer(Modifier.width(8.dp))
-                        Text(tab.label, color = MapeColors.Ink, fontFamily = Outfit, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                        Spacer(Modifier.width(5.dp))
+                        Text(tab.label, color = MapeColors.Ink, fontFamily = Outfit, fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
+                        if (tab == Tab.Radio) {
+                            Spacer(Modifier.width(5.dp))
+                            Row(
+                                modifier = Modifier.height(13.dp),
+                                verticalAlignment = Alignment.Bottom,
+                                horizontalArrangement = Arrangement.spacedBy(1.dp),
+                            ) {
+                                val strength = if (RadioManager.netOnline) 4 else 1
+                                repeat(4) { index ->
+                                    Box(
+                                        Modifier.width(2.dp).height((4 + index * 2).dp)
+                                            .clip(CircleShape)
+                                            .background(if (index < strength) Color(0xFF20B15A) else MapeColors.Ink.copy(alpha = 0.35f)),
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
                 if (!isActive && badge > 0) {

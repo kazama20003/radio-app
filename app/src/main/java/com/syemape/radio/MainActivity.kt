@@ -280,7 +280,7 @@ private fun AppRoot(onDarkModeChanged: (Boolean) -> Unit) {
                 )
             } else {
                 when (tab) {
-                    Tab.Mapa -> MapScreen(topInset)
+                    Tab.Mapa -> MapScreen(topInset, bottomInset)
                     Tab.Radio -> RadioScreen(
                         topInset,
                         bottomInset,

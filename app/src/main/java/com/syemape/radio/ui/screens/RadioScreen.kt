@@ -128,8 +128,8 @@ fun RadioScreen(
         Column(
             Modifier.weight(1f).fillMaxWidth()
                 .padding(horizontal = 12.dp)
-                .padding(bottom = bottomPadding + 76.dp, top = 10.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+                .padding(bottom = bottomPadding + 72.dp, top = 6.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Row(
@@ -142,9 +142,8 @@ fun RadioScreen(
                         Box(
                             Modifier.clip(CircleShape)
                                 .background(if (selected) RadioColors.Ink else RadioColors.Card)
-                                .border(1.dp, RadioColors.Border, CircleShape)
                                 .clickable { RadioManager.selectChannel(channel.id) }
-                                .padding(horizontal = 14.dp, vertical = 7.dp),
+                                .padding(horizontal = 12.dp, vertical = 6.dp),
                         ) {
                             Text(
                                 (if (channel.isImportant) "★ " else "") + (channel.name ?: "Canal"),
@@ -161,8 +160,7 @@ fun RadioScreen(
                 }
                 if (isAdmin && RadioManager.channelId != null) {
                     Box(
-                        Modifier.size(34.dp).clip(CircleShape).background(RadioColors.Card)
-                            .border(1.dp, RadioColors.Border, CircleShape)
+                        Modifier.size(32.dp).clip(CircleShape).background(RadioColors.Card)
                             .clickable {
                                 val current = RadioManager.channels.firstOrNull { it.id == RadioManager.channelId }
                                 channelNameEditDraft = current?.name.orEmpty()
@@ -174,8 +172,7 @@ fun RadioScreen(
                 }
                 if (RadioManager.channels.size > 1) {
                     Box(
-                        Modifier.size(34.dp).clip(CircleShape).background(RadioColors.Card)
-                            .border(1.dp, RadioColors.Border, CircleShape)
+                        Modifier.size(32.dp).clip(CircleShape).background(RadioColors.Card)
                             .clickable { showParallelChannels = true },
                         contentAlignment = Alignment.Center,
                     ) {
@@ -184,8 +181,7 @@ fun RadioScreen(
                 }
                 if (isAdmin) {
                     Box(
-                        Modifier.size(34.dp).clip(CircleShape).background(RadioColors.Card)
-                            .border(1.dp, RadioColors.Border, CircleShape)
+                        Modifier.size(32.dp).clip(CircleShape).background(RadioColors.Card)
                             .clickable { createChannelError = null; showCreateChannel = true },
                         contentAlignment = Alignment.Center,
                     ) { Icon(MapeIcons.Plus, contentDescription = "Crear canal", tint = RadioColors.Text, modifier = Modifier.size(18.dp)) }
@@ -227,9 +223,8 @@ fun RadioScreen(
                 }
             }
             Box(
-                Modifier.fillMaxWidth().height(46.dp).clip(RoundedCornerShape(14.dp))
-                    .background(RadioColors.Card).border(1.dp, RadioColors.Border, RoundedCornerShape(18.dp))
-                    .padding(horizontal = 10.dp, vertical = 5.dp),
+                Modifier.fillMaxWidth().height(38.dp).clip(RoundedCornerShape(12.dp))
+                    .background(RadioColors.Card).padding(horizontal = 8.dp, vertical = 4.dp),
                 contentAlignment = Alignment.Center,
             ) {
                 TunerRuler(
@@ -242,8 +237,7 @@ fun RadioScreen(
             RadioSpeakerStatus()
 
             Row(
-                Modifier.fillMaxWidth().clip(CircleShape).background(RadioColors.Card)
-                    .border(1.dp, RadioColors.Border, CircleShape).padding(4.dp),
+                Modifier.fillMaxWidth().clip(CircleShape).background(RadioColors.Card).padding(3.dp),
                 horizontalArrangement = Arrangement.spacedBy(4.dp),
             ) {
                 OutputPill(RadioManager.normalDeviceLabel, selected = !RadioManager.speakerOn) {
@@ -451,7 +445,7 @@ fun RadioScreen(
 @Composable
 private fun RadioHero(topPadding: Dp, onOpenSettings: () -> Unit, compact: Boolean = false) {
     Box(
-        Modifier.fillMaxWidth().height(if (compact) 126.dp else 184.dp).clip(RoundedCornerShape(bottomStart = 24.dp, bottomEnd = 24.dp)),
+        Modifier.fillMaxWidth().height(if (compact) 112.dp else 184.dp),
     ) {
         Image(
             painter = painterResource(com.syemape.radio.R.drawable.radio_hero),
@@ -505,7 +499,7 @@ private fun RadioMemberCard(onUserClick: (com.syemape.radio.data.MiniUser) -> Un
     val users = RadioManager.connectedUsers
     Row(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(15.dp)).background(RadioColors.Card)
-            .border(1.dp, RadioColors.Border, RoundedCornerShape(15.dp)).padding(horizontal = 10.dp, vertical = 5.dp),
+            .padding(horizontal = 10.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
@@ -568,7 +562,7 @@ private fun OnlinePulseDot(modifier: Modifier = Modifier) {
 private fun RadioActionCard(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, modifier: Modifier, onClick: () -> Unit) {
     Row(
         modifier.height(43.dp).clip(RoundedCornerShape(14.dp)).background(RadioColors.Card)
-            .border(1.dp, RadioColors.Border, RoundedCornerShape(14.dp)).clickable(onClick = onClick)
+            .clickable(onClick = onClick)
             .padding(horizontal = 11.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.Center,
@@ -597,7 +591,7 @@ private fun RadioSpeakerStatus() {
     }
     Row(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(17.dp)).background(RadioColors.Card)
-            .border(1.dp, RadioColors.Border, RoundedCornerShape(14.dp)).padding(horizontal = 10.dp, vertical = 7.dp),
+            .padding(horizontal = 10.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(11.dp),
     ) {
@@ -606,16 +600,6 @@ private fun RadioSpeakerStatus() {
             Text(label, color = Color(0xFFD71920), fontFamily = Outfit, fontWeight = FontWeight.Bold, fontSize = 10.sp)
             Text(name, color = RadioColors.Text, fontFamily = Outfit, fontWeight = FontWeight.SemiBold, fontSize = 14.sp, maxLines = 1)
         }
-        Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(3.dp), modifier = Modifier.height(22.dp)) {
-            val strength = if (RadioManager.netOnline) 4 else 1
-            repeat(4) { index ->
-                Box(
-                    Modifier.width(4.dp).height((7 + index * 4).dp).clip(CircleShape)
-                        .background(if (index < strength) Color(0xFF20B15A) else RadioColors.Border),
-                )
-            }
-        }
-        Text(if (RadioManager.netOnline) "Buena" else "Sin red", color = RadioColors.TextMuted, fontFamily = Outfit, fontSize = 10.sp)
     }
 }
 
