@@ -98,7 +98,7 @@ fun PrivateRadioScreen(
     }
 
     val iAmSpeaking = RadioManager.talking
-    val otherIsSpeaking = RadioManager.remoteSpeaking && !iAmSpeaking
+    val otherIsSpeaking = (RadioManager.remoteSpeaking || RadioManager.speakerLabel != null) && !iAmSpeaking
     val activeSpeaker = when {
         iAmSpeaking -> SessionManager.user?.nickname?.takeIf { it.isNotBlank() }
             ?: SessionManager.user?.name ?: "Tú"
