@@ -1127,7 +1127,7 @@ object RadioManager {
     private fun hasConsumerForChannel(sourceChannelId: String): Boolean =
         consumerChannelIds.values.any { it == sourceChannelId }
 
-    /** Tono de radio de frecuencias alternadas al abrir/cerrar PTT. */
+    /** Tono de permiso para hablar al abrir y tono descendente al cerrar el PTT. */
     private fun beep(durationMs: Int, waitUntilPlayed: Boolean = false) {
         if (Prefs.radioSound == false) return
         chirpsInFlight.incrementAndGet()
@@ -1135,15 +1135,15 @@ object RadioManager {
             var track: android.media.AudioTrack? = null
             try {
                 val sampleRate = 24_000
-                // Patrón corto de radio: al transmitir sube y confirma; al soltar
-                // responde con dos tonos descendentes. No es una versión alargada del grillo.
+                // Al abrir: doble tono ascendente de permiso de transmisión (roger/beep).
+                // Al soltar: doble tono descendente de cortesía.
                 val frequencies = if (durationMs >= 200) {
-                    doubleArrayOf(880.0, 1320.0, 990.0)
+                    doubleArrayOf(980.0, 1480.0)
                 } else {
                     doubleArrayOf(1320.0, 880.0)
                 }
-                val toneMs = if (durationMs >= 200) 48 else 40
-                val gapMs = 16
+                val toneMs = if (durationMs >= 200) 68 else 40
+                val gapMs = if (durationMs >= 200) 20 else 16
                 val toneSamples = sampleRate * toneMs / 1000
                 val periodSamples = sampleRate * (toneMs + gapMs) / 1000
                 val totalSamples = periodSamples * (frequencies.size - 1) + toneSamples
@@ -1396,7 +1396,10 @@ object RadioManager {
                     android.util.Log.w(TAG, "PTT cancelado: no se confirmó la salida de audio")
                     return@execute fail()
                 }
-                beep(220)
+                // Reproducir y terminar el tono por la ruta ya confirmada antes de
+                // abrir el micrófono: así el hablante oye el permiso y no se pierde
+                // la primera palabra por el cambio de ruta Bluetooth.
+                beep(220, waitUntilPlayed = true)
                 runCatching { audioManager?.enabled = true } // micro en el MISMO hilo que produce
                 val send = sendTransport ?: return@execute fail()
                 val track = audioManager?.track ?: return@execute fail()
