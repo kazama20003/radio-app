@@ -52,6 +52,7 @@ private fun buildIcon(sw: Float, vararg parts: Part): ImageVector {
 }
 
 object MapeIcons {
+    val Edit = buildIcon(1.9f, Part("M4 16.5V20h3.5L19.7 7.8a2 2 0 0 0-3.5-3.5L4 16.5z"), Part("M14.8 5.7l3.5 3.5"))
     val Pin = buildIcon(
         2f,
         Part("M12 21s-6-5.3-6-11a6 6 0 0 1 12 0c0 5.7-6 11-6 11z"),

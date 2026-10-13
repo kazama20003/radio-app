@@ -5,6 +5,8 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.media.AudioAttributes
+import android.net.Uri
 import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
@@ -24,7 +26,9 @@ object Notifier {
     private const val CH_ALERT_CRIT_QUIET = "mape_alerts_critical_quiet" // crítica, sin sonido (radio activa)
     private const val CH_ALERT = "mape_alerts"                       // normal, con sonido
     private const val CH_ALERT_QUIET = "mape_alerts_quiet"           // normal, sin sonido (radio activa)
-    private const val CH_PRIVATE_CALL = "mape_private_calls"
+    // Nuevo ID porque Android no deja modificar sonido/vibración de canales existentes.
+    private const val CH_PRIVATE_CALL = "mape_private_calls_v2"
+    private const val CH_PRIVATE_ACTIVE = "mape_private_active_v2"
     private val RED = 0xFFE5322D.toInt()
 
     private var appContext: Context? = null
@@ -42,10 +46,23 @@ object Notifier {
 
         if (nm.getNotificationChannel(CH_PRIVATE_CALL) == null) {
             nm.createNotificationChannel(NotificationChannel(CH_PRIVATE_CALL, "Llamadas de radio privada", NotificationManager.IMPORTANCE_HIGH).apply {
-                description = "Llamadas entrantes de radio privada"
+                description = "Timbre y vibración para llamadas entrantes de radio privada"
+                val sound = Uri.parse("android.resource://${appContext?.packageName}/${R.raw.radio_private_ring}")
+                val soundAttributes = AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_NOTIFICATION_RINGTONE)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                    .build()
+                setSound(sound, soundAttributes)
                 enableVibration(true)
-                vibrationPattern = longArrayOf(0, 500, 300, 500, 300, 500)
+                vibrationPattern = longArrayOf(0, 850, 250, 850, 250, 850, 250, 850)
                 enableLights(true); lightColor = RED
+            })
+        }
+        if (nm.getNotificationChannel(CH_PRIVATE_ACTIVE) == null) {
+            nm.createNotificationChannel(NotificationChannel(CH_PRIVATE_ACTIVE, "Radio privada activa", NotificationManager.IMPORTANCE_HIGH).apply {
+                description = "Controles silenciosos de una transmisión privada activa"
+                setSound(null, null)
+                enableVibration(false)
             })
         }
 
@@ -140,7 +157,7 @@ object Notifier {
             return PendingIntent.getActivity(ctx, (callId + action).hashCode(), launch,
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         }
-        val notification = NotificationCompat.Builder(ctx, CH_PRIVATE_CALL)
+        val notification = NotificationCompat.Builder(ctx, CH_PRIVATE_ACTIVE)
             .setSmallIcon(R.drawable.ic_stat_alert).setColor(RED)
             .setContentTitle("Radio privada activa")
             .setContentText("Con $peerName · toca para volver a la transmisión")
@@ -152,12 +169,17 @@ object Notifier {
             .addAction(0, "Volver", intent("open"))
             .addAction(0, "Colgar", intent("hangup"))
             .build()
-        runCatching { NotificationManagerCompat.from(ctx).notify(callId.hashCode(), notification) }
+        runCatching { NotificationManagerCompat.from(ctx).notify(activePrivateCallId(callId), notification) }
     }
 
     fun cancelPrivateCall(callId: String) {
-        appContext?.let { runCatching { NotificationManagerCompat.from(it).cancel(callId.hashCode()) } }
+        appContext?.let {
+            runCatching { NotificationManagerCompat.from(it).cancel(callId.hashCode()) }
+            runCatching { NotificationManagerCompat.from(it).cancel(activePrivateCallId(callId)) }
+        }
     }
+
+    private fun activePrivateCallId(callId: String) = callId.hashCode() xor 0x4D415045
 
     /** Lanza (o actualiza) la notificación de una alerta recibida en vivo. */
     fun notifyAlert(a: Alert) {

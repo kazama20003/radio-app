@@ -116,6 +116,7 @@ object RadioManager {
     private var radioDisconnectListener: Emitter.Listener? = null
     private var recentVoiceQueue: List<RadioTransmission> = emptyList()
     private var recentVoiceGeneration = 0
+    @Volatile private var recentVoiceFetchActive = false
 
     fun hasMicPermission(context: Context): Boolean =
         context.checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
@@ -700,9 +701,10 @@ object RadioManager {
 
     private fun switchRadioScope(id: String, name: String, persist: Boolean, restoreImportant: Boolean) {
         if (id == channelId || id.isBlank()) return
-        if (recentVoiceQueue.isNotEmpty()) {
+        if (recentVoiceQueue.isNotEmpty() || recentVoiceFetchActive) {
             recentVoiceGeneration++
             recentVoiceQueue = emptyList()
+            recentVoiceFetchActive = false
             stopVoiceNote { }
         }
         val prev = channelId
@@ -1133,9 +1135,17 @@ object RadioManager {
             try {
                 val sampleRate = 24_000
                 // Varias notas agudas con ataque y caída corta, para que suene a grillo.
-                val chirpMs = if (durationMs >= 140) 36 else 28
-                val gapMs = 22
-                val chirpCount = if (durationMs >= 140) 6 else 3
+                val chirpMs = when {
+                    durationMs >= 200 -> 48
+                    durationMs >= 140 -> 36
+                    else -> 28
+                }
+                val gapMs = if (durationMs >= 200) 26 else 22
+                val chirpCount = when {
+                    durationMs >= 200 -> 7
+                    durationMs >= 140 -> 6
+                    else -> 3
+                }
                 val chirpSamples = sampleRate * chirpMs / 1000
                 val periodSamples = sampleRate * (chirpMs + gapMs) / 1000
                 val totalSamples = periodSamples * (chirpCount - 1) + chirpSamples
@@ -1388,7 +1398,7 @@ object RadioManager {
                     android.util.Log.w(TAG, "PTT cancelado: no se confirmó la salida de audio")
                     return@execute fail()
                 }
-                beep(150)
+                beep(220)
                 runCatching { audioManager?.enabled = true } // micro en el MISMO hilo que produce
                 val send = sendTransport ?: return@execute fail()
                 val track = audioManager?.track ?: return@execute fail()
@@ -1599,15 +1609,25 @@ object RadioManager {
     }
 
     /** Reproduce manualmente los tres audios recientes del canal, del más antiguo al nuevo. */
-    fun playLastThreeVoiceNotes(onState: (String?) -> Unit) {
-        if (recentVoiceQueue.isNotEmpty()) {
+    fun playLastThreeVoiceNotes(
+        onState: (String?) -> Unit,
+        onLoading: (Boolean) -> Unit = {},
+        onProgress: (Int, Int) -> Unit = { _, _ -> },
+    ) {
+        if (recentVoiceQueue.isNotEmpty() || recentVoiceFetchActive) {
             recentVoiceGeneration++
             recentVoiceQueue = emptyList()
+            recentVoiceFetchActive = false
+            onLoading(false)
             stopVoiceNote(onState)
             return
         }
-        val cid = channelId ?: return
+        val cid = channelId
+        if (cid.isNullOrBlank()) { onLoading(false); onState(null); return }
         val generation = ++recentVoiceGeneration
+        recentVoiceFetchActive = true
+        onLoading(true)
+        onProgress(0, 0)
         ui.launch {
             val notes = runCatching {
                 withContext(Dispatchers.IO) { Backend.api.radioHistory(cid, 100) }
@@ -1615,41 +1635,66 @@ object RadioManager {
                     .take(3)
                     .reversed()
             }.getOrElse {
-                onState(null)
+                if (generation == recentVoiceGeneration) {
+                    recentVoiceFetchActive = false
+                    onLoading(false)
+                    onState(null)
+                }
                 return@launch
             }
             if (generation != recentVoiceGeneration || cid != channelId) return@launch
+            recentVoiceFetchActive = false
             recentVoiceQueue = notes
             if (notes.isEmpty()) {
+                onLoading(false)
                 onState(null)
                 return@launch
             }
-            playRecentVoiceAt(generation, 0, onState)
+            onProgress(1, notes.size)
+            playRecentVoiceAt(generation, 0, onState, onLoading, onProgress)
         }
     }
 
-    private fun playRecentVoiceAt(generation: Int, index: Int, onState: (String?) -> Unit) {
+    private fun playRecentVoiceAt(
+        generation: Int,
+        index: Int,
+        onState: (String?) -> Unit,
+        onLoading: (Boolean) -> Unit,
+        onProgress: (Int, Int) -> Unit,
+    ) {
         if (generation != recentVoiceGeneration) return
         val note = recentVoiceQueue.getOrNull(index)
         if (note == null) {
             recentVoiceQueue = emptyList()
+            onLoading(false)
             onState(null)
             return
         }
         val url = mediaUrlOf(note.audioKey)
         if (url == null) {
-            playRecentVoiceAt(generation, index + 1, onState)
+            playRecentVoiceAt(generation, index + 1, onState, onLoading, onProgress)
             return
         }
+        onProgress(index + 1, recentVoiceQueue.size)
+        onLoading(true)
         playVoiceNote(
             url = url,
             id = note.id,
+            onLoading = { ui.launch { if (generation == recentVoiceGeneration) onLoading(true) } },
             onCompletion = {
                 ui.launch {
-                    if (generation == recentVoiceGeneration) playRecentVoiceAt(generation, index + 1, onState)
+                    if (generation == recentVoiceGeneration) playRecentVoiceAt(generation, index + 1, onState, onLoading, onProgress)
                 }
             },
-            onState = { state -> if (state != null || index == recentVoiceQueue.lastIndex) onState(state) },
+            onError = { ui.launch {
+                if (generation == recentVoiceGeneration) playRecentVoiceAt(generation, index + 1, onState, onLoading, onProgress)
+            } },
+            onState = { state ->
+                if (state != null) onLoading(false)
+                else if (index < recentVoiceQueue.lastIndex) onLoading(true)
+                else onLoading(false)
+                if (state != null || index == recentVoiceQueue.lastIndex) onState(state)
+            },
         )
     }
 
@@ -1662,10 +1707,11 @@ object RadioManager {
         onCompletion: (() -> Unit)? = null,
         onState: (String?) -> Unit,
         onError: (() -> Unit)? = null,
+        onLoading: (() -> Unit)? = null,
     ) {
         if (notePlayingId == id) { stopVoiceNote(onState); return }
         if (talking || consuming || remoteProducerId != null || importantProducerIds.isNotEmpty()) {
-            ui.launch { onState(null) }
+            if (onError != null) ui.launch { onError() } else ui.launch { onState(null) }
             android.util.Log.i(TAG, "voice note deferred: radio audio has priority")
             return
         }
@@ -1723,6 +1769,7 @@ object RadioManager {
                 if (onError != null) onError.invoke() else onCompletion?.invoke()
                 true
             }
+            onLoading?.invoke()
             mp.prepareAsync()
         }.onFailure {
             stopVoiceNote(onState)

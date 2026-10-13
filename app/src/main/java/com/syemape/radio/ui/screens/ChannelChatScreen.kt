@@ -9,6 +9,8 @@ import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -44,6 +46,7 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.layout.ContentScale
@@ -144,6 +147,12 @@ fun ChannelChatScreen(channelId: String, title: String, topPadding: Dp, bottomPa
     var attachMenu by remember { mutableStateOf(false) }
     var fullscreenImage by remember { mutableStateOf<String?>(null) }
     var cameraOutput by remember { mutableStateOf<Uri?>(null) }
+    val liveTalker = when {
+        com.syemape.radio.data.RadioManager.talking -> SessionManager.user?.nickname?.takeIf { it.isNotBlank() }
+            ?: SessionManager.user?.name ?: "Tú"
+        com.syemape.radio.data.RadioManager.remoteSpeaking -> com.syemape.radio.data.RadioManager.speakerLabel?.takeIf { it.isNotBlank() }
+        else -> null
+    }
 
     fun toast(msg: String) = android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_SHORT).show()
 
@@ -432,9 +441,15 @@ fun ChannelChatScreen(channelId: String, title: String, topPadding: Dp, bottomPa
             Box(Modifier.size(42.dp).clip(CircleShape).pressScale { onBack() }, contentAlignment = Alignment.Center) {
                 Icon(MapeIcons.ArrowLeft, null, tint = MapeColors.Text, modifier = Modifier.size(24.dp))
             }
-            Column {
-                Text(title, color = MapeColors.Text, fontFamily = Outfit, fontWeight = FontWeight.SemiBold, fontSize = 18.sp)
+            Column(Modifier.weight(1f)) {
+                Text(title, color = MapeColors.Text, fontFamily = Outfit, fontWeight = FontWeight.SemiBold, fontSize = 18.sp, maxLines = 1)
                 Text("Chat del canal", color = MapeColors.TextMuted, fontFamily = Outfit, fontSize = 12.sp)
+                if (liveTalker != null) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Icon(MapeIcons.Mic, null, tint = MapeColors.Red, modifier = Modifier.size(13.dp))
+                        Text("Al aire · $liveTalker", color = MapeColors.Red, fontFamily = Outfit, fontWeight = FontWeight.SemiBold, fontSize = 11.sp, maxLines = 1)
+                    }
+                }
             }
         }
 
@@ -580,6 +595,34 @@ fun ChannelChatScreen(channelId: String, title: String, topPadding: Dp, bottomPa
                     textStyle = TextStyle(fontFamily = Outfit, fontSize = 15.sp, color = MapeColors.Text),
                     cursorBrush = SolidColor(MapeColors.Ink),
                     modifier = Modifier.fillMaxWidth(),
+                )
+            }
+            val pttReady = com.syemape.radio.data.RadioManager.connected &&
+                com.syemape.radio.data.RadioManager.channelId == channelId
+            Box(
+                Modifier.size(44.dp).clip(CircleShape)
+                    .background(if (com.syemape.radio.data.RadioManager.talking) MapeColors.Red else MapeColors.Bg)
+                    .pointerInput(channelId) {
+                        awaitEachGesture {
+                            awaitFirstDown(requireUnconsumed = false)
+                            if (!com.syemape.radio.data.RadioManager.connected || com.syemape.radio.data.RadioManager.channelId != channelId) {
+                                return@awaitEachGesture
+                            }
+                            com.syemape.radio.data.RadioManager.startTalking()
+                            try {
+                                while (awaitPointerEvent().changes.any { it.pressed }) { }
+                            } finally {
+                                com.syemape.radio.data.RadioManager.stopTalking()
+                            }
+                        }
+                    },
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    MapeIcons.Mic,
+                    contentDescription = if (pttReady) "Mantén para hablar por radio" else "Radio desconectada",
+                    tint = if (pttReady) MapeColors.Text else MapeColors.TextFaint,
+                    modifier = Modifier.size(21.dp),
                 )
             }
             Box(

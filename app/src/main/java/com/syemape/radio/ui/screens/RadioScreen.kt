@@ -42,6 +42,7 @@ import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -100,7 +101,7 @@ fun RadioScreen(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val isAdmin = SessionManager.user?.role.equals("ADMIN", ignoreCase = true)
+    val isAdmin = SessionManager.user?.role?.trim()?.contains("ADMIN", ignoreCase = true) == true
     var showCreateChannel by remember { mutableStateOf(false) }
     var showParallelChannels by remember { mutableStateOf(false) }
     var channelNameDraft by remember { mutableStateOf("") }
@@ -160,7 +161,7 @@ fun RadioScreen(
                 }
                 if (isAdmin && RadioManager.channelId != null) {
                     Box(
-                        Modifier.size(32.dp).clip(CircleShape).background(RadioColors.Card)
+                        Modifier.size(40.dp).clip(CircleShape).background(RadioColors.Card)
                             .clickable {
                                 val current = RadioManager.channels.firstOrNull { it.id == RadioManager.channelId }
                                 channelNameEditDraft = current?.name.orEmpty()
@@ -168,11 +169,11 @@ fun RadioScreen(
                                 showEditChannel = true
                             },
                         contentAlignment = Alignment.Center,
-                    ) { Text("✎", color = RadioColors.Text, fontFamily = Outfit, fontSize = 18.sp) }
+                    ) { Icon(MapeIcons.Edit, contentDescription = "Editar canal", tint = RadioColors.Text, modifier = Modifier.size(19.dp)) }
                 }
                 if (RadioManager.channels.size > 1) {
                     Box(
-                        Modifier.size(32.dp).clip(CircleShape).background(RadioColors.Card)
+                        Modifier.size(40.dp).clip(CircleShape).background(RadioColors.Card)
                             .clickable { showParallelChannels = true },
                         contentAlignment = Alignment.Center,
                     ) {
@@ -181,7 +182,7 @@ fun RadioScreen(
                 }
                 if (isAdmin) {
                     Box(
-                        Modifier.size(32.dp).clip(CircleShape).background(RadioColors.Card)
+                        Modifier.size(40.dp).clip(CircleShape).background(RadioColors.Card)
                             .clickable { createChannelError = null; showCreateChannel = true },
                         contentAlignment = Alignment.Center,
                     ) { Icon(MapeIcons.Plus, contentDescription = "Crear canal", tint = RadioColors.Text, modifier = Modifier.size(18.dp)) }
@@ -204,6 +205,13 @@ fun RadioScreen(
 
             val lastNote = RadioManager.lastVoiceNote
             var lastPlaying by remember { mutableStateOf(false) }
+            var lastLoading by remember { mutableStateOf(false) }
+            var notesProgress by remember { mutableStateOf(0 to 0) }
+            LaunchedEffect(RadioManager.channelId) {
+                lastPlaying = false
+                lastLoading = false
+                notesProgress = 0 to 0
+            }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(9.dp)) {
                 RadioActionCard(
                     icon = MapeIcons.Chat,
@@ -216,9 +224,21 @@ fun RadioScreen(
                 if (lastNote != null) {
                     RadioActionCard(
                         icon = if (lastPlaying) MapeIcons.Pause else MapeIcons.Play,
-                        label = if (lastPlaying) "Pausar notas" else "3 notas recientes",
+                        label = when {
+                            lastLoading && notesProgress.second > 0 -> "Cargando ${notesProgress.first}/${notesProgress.second}"
+                            lastLoading -> "Buscando audios…"
+                            lastPlaying && notesProgress.second > 0 -> "Nota ${notesProgress.first}/${notesProgress.second} · pausar"
+                            else -> "3 notas recientes"
+                        },
                         modifier = Modifier.weight(1.35f),
-                        onClick = { RadioManager.playLastThreeVoiceNotes { id -> lastPlaying = id != null } },
+                        loading = lastLoading,
+                        onClick = {
+                            RadioManager.playLastThreeVoiceNotes(
+                                onState = { id -> lastPlaying = id != null },
+                                onLoading = { lastLoading = it },
+                                onProgress = { current, total -> notesProgress = current to total },
+                            )
+                        },
                     )
                 }
             }
@@ -539,7 +559,7 @@ private fun ConnectedAlias(alias: String, modifier: Modifier = Modifier) {
     ) {
         OnlinePulseDot(Modifier.size(6.dp))
         Text(alias, color = RadioColors.Text, fontFamily = Outfit, fontWeight = FontWeight.SemiBold, fontSize = 10.sp, maxLines = 1)
-        Text("☎", color = Color(0xFFE5322D), fontSize = 11.sp)
+        Icon(MapeIcons.Radio, contentDescription = "Radio privada", tint = Color(0xFFE5322D), modifier = Modifier.size(15.dp))
     }
 }
 
@@ -559,7 +579,13 @@ private fun OnlinePulseDot(modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun RadioActionCard(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, modifier: Modifier, onClick: () -> Unit) {
+private fun RadioActionCard(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+    modifier: Modifier,
+    loading: Boolean = false,
+    onClick: () -> Unit,
+) {
     Row(
         modifier.height(43.dp).clip(RoundedCornerShape(14.dp)).background(RadioColors.Card)
             .clickable(onClick = onClick)
@@ -567,7 +593,9 @@ private fun RadioActionCard(icon: androidx.compose.ui.graphics.vector.ImageVecto
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.Center,
     ) {
-        Icon(icon, null, tint = Color(0xFFD71920), modifier = Modifier.size(18.dp))
+        if (loading) androidx.compose.material3.CircularProgressIndicator(
+            modifier = Modifier.size(15.dp), color = Color(0xFFD71920), strokeWidth = 2.dp,
+        ) else Icon(icon, null, tint = Color(0xFFD71920), modifier = Modifier.size(18.dp))
         Spacer(Modifier.width(7.dp))
         Text(label, color = RadioColors.Text, fontFamily = Outfit, fontWeight = FontWeight.SemiBold, fontSize = 11.sp, maxLines = 1)
     }
