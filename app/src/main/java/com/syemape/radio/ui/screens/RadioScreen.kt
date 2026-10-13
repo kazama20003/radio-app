@@ -95,7 +95,7 @@ fun RadioScreen(
     topPadding: Dp,
     bottomPadding: Dp = 0.dp,
     onOpenChannelChat: (String, String) -> Unit = { _, _ -> },
-    onOpenPrivateRadio: (String, String) -> Unit = { _, _ -> },
+    onOpenPrivateRadio: (String, String, String) -> Unit = { _, _, _ -> },
     onOpenSettings: () -> Unit = {},
 ) {
     val context = LocalContext.current
@@ -199,7 +199,7 @@ fun RadioScreen(
                         Backend.api.createConversation(CreateConversationRequest(type = "DIRECT", memberIds = listOf(user.id)))
                     }.onSuccess { convo ->
                         val label = user.nickname?.takeIf { it.isNotBlank() } ?: user.name ?: "Usuario"
-                        onOpenPrivateRadio(convo.id, label)
+                        onOpenPrivateRadio(convo.id, user.id, label)
                     }.onFailure {
                         android.widget.Toast.makeText(context, "No se pudo abrir la radio privada", android.widget.Toast.LENGTH_SHORT).show()
                     }
@@ -545,6 +545,7 @@ private fun ConnectedAlias(alias: String, modifier: Modifier = Modifier) {
     ) {
         OnlinePulseDot(Modifier.size(6.dp))
         Text(alias, color = RadioColors.Text, fontFamily = Outfit, fontWeight = FontWeight.SemiBold, fontSize = 10.sp, maxLines = 1)
+        Text("☎", color = Color(0xFFE5322D), fontSize = 11.sp)
     }
 }
 

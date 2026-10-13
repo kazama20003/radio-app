@@ -63,6 +63,7 @@ object RadioManager {
     var audioLevel by mutableStateOf(0f); private set        // nivel de voz 0..1 (mueve la onda)
     var lastVoiceNote by mutableStateOf<RadioTransmission?>(null); private set // última nota de voz del canal
     var netOnline by mutableStateOf(true); private set       // hay internet (ConnectivityManager)
+    var privateCall by mutableStateOf<PrivateRadioCallState?>(null); private set
 
     private val ui = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val worker = Executors.newSingleThreadExecutor()
@@ -173,6 +174,38 @@ object RadioManager {
         radioDisconnectListener?.let { socket.off("disconnect", it) }
         socket.off("ms:newProducer"); socket.off("ms:producerClosed"); socket.off("channel:presence")
         socket.off("channel:important-changed")
+        socket.off("private-radio:incoming")
+        socket.off("private-radio:accepted")
+        socket.off("private-radio:declined")
+        socket.off("private-radio:ended")
+        socket.on("private-radio:incoming", Emitter.Listener { args ->
+            val o = args.firstOrNull() as? JSONObject ?: return@Listener
+            val id = o.optString("callId"); val convo = o.optString("conversationId")
+            val peerId = o.optString("callerId"); val name = o.optString("callerName", "Usuario")
+            if (id.isBlank() || convo.isBlank() || peerId.isBlank()) return@Listener
+            ui.launch {
+                privateCall = PrivateRadioCallState(id, convo, peerId, name, "INCOMING", false)
+                Notifier.notifyPrivateCall(id, name)
+            }
+        })
+        socket.on("private-radio:accepted", Emitter.Listener { args ->
+            val o = args.firstOrNull() as? JSONObject ?: return@Listener
+            ui.launch {
+                val current = privateCall ?: return@launch
+                if (current.callId != o.optString("callId")) return@launch
+                Notifier.cancelPrivateCall(current.callId)
+                privateCall = current.copy(phase = "ACTIVE", peerName = o.optString("peerName", current.peerName))
+            }
+        })
+        socket.on("private-radio:ended", Emitter.Listener { args ->
+            val o = args.firstOrNull() as? JSONObject ?: return@Listener
+            ui.launch {
+                val current = privateCall ?: return@launch
+                if (current.callId != o.optString("callId")) return@launch
+                Notifier.cancelPrivateCall(current.callId)
+                privateCall = current.copy(phase = o.optString("reason", "ENDED").uppercase(), reason = o.optString("reason"))
+            }
+        })
         socket.on("channel:presence", Emitter.Listener { args ->
             val o = args.firstOrNull() as? JSONObject ?: return@Listener
             if (o.optString("channelId") == channelId) {
@@ -575,6 +608,46 @@ object RadioManager {
         switchRadioScope(id, channels.firstOrNull { it.id == id }?.let {
             listOfNotNull(it.name, it.description).joinToString(" · ").ifBlank { "Canal" }
         } ?: channelName, persist = true, restoreImportant = true)
+    }
+
+    fun startPrivateCall(conversationId: String, peerId: String, peerName: String) {
+        val publicChannelId = channelId?.takeUnless { it.startsWith("private:") }
+        if (publicChannelId.isNullOrBlank() || peerId.isBlank() || privateCall?.phase in setOf("OUTGOING", "INCOMING", "ACTIVE")) return
+        val callId = java.util.UUID.randomUUID().toString()
+        privateCall = PrivateRadioCallState(callId, conversationId, peerId, peerName, "OUTGOING", true)
+        socket.emit("private-radio:call", JSONObject().put("callId", callId).put("conversationId", conversationId)
+            .put("targetUserId", peerId).put("channelId", publicChannelId), Ack { args ->
+            val result = args.firstOrNull() as? JSONObject
+            if (result?.optBoolean("ok") != true) ui.launch {
+                privateCall = privateCall?.takeIf { it.callId == callId }?.copy(phase = "FAILED", reason = result?.optString("error") ?: "No se pudo iniciar la llamada.")
+            }
+        })
+    }
+
+    fun answerPrivateCall(accept: Boolean, callId: String? = privateCall?.callId) {
+        val current = privateCall ?: return
+        if (current.phase != "INCOMING" || current.callId != callId) return
+        Notifier.cancelPrivateCall(current.callId)
+        socket.emit("private-radio:answer", JSONObject().put("callId", current.callId).put("accept", accept), Ack { args ->
+            val result = args.firstOrNull() as? JSONObject
+            ui.launch {
+                if (result?.optBoolean("ok") != true) privateCall = current.copy(phase = "ENDED", reason = result?.optString("error") ?: "La llamada ya no está disponible.")
+                else if (!accept) privateCall = current.copy(phase = "DECLINED")
+            }
+        })
+    }
+
+    fun endPrivateCall() {
+        val current = privateCall ?: return
+        if (current.phase == "OUTGOING") socket.emit("private-radio:cancel", JSONObject().put("callId", current.callId))
+        else if (current.phase == "ACTIVE") socket.emit("private-radio:end", JSONObject().put("callId", current.callId))
+        Notifier.cancelPrivateCall(current.callId)
+        if (privateRadioMode) exitPrivateRadio()
+        privateCall = null
+    }
+
+    fun clearPrivateCall(callId: String) {
+        if (privateCall?.callId == callId) privateCall = null
     }
 
     /** Entra a una sala PTT privada asociada a una conversación DIRECT. */

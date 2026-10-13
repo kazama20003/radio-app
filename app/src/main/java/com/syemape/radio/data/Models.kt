@@ -75,6 +75,16 @@ data class MiniUser(
     val isOnline: Boolean = false,
 )
 
+data class PrivateRadioCallState(
+    val callId: String,
+    val conversationId: String,
+    val peerId: String,
+    val peerName: String,
+    val phase: String,
+    val outgoing: Boolean,
+    val reason: String? = null,
+)
+
 data class MiniUnit(val id: String = "", val code: String? = null, val plate: String? = null)
 
 /** Unidad en vivo (tracking/live). */

@@ -24,6 +24,7 @@ object Notifier {
     private const val CH_ALERT_CRIT_QUIET = "mape_alerts_critical_quiet" // crítica, sin sonido (radio activa)
     private const val CH_ALERT = "mape_alerts"                       // normal, con sonido
     private const val CH_ALERT_QUIET = "mape_alerts_quiet"           // normal, sin sonido (radio activa)
+    private const val CH_PRIVATE_CALL = "mape_private_calls"
     private val RED = 0xFFE5322D.toInt()
 
     private var appContext: Context? = null
@@ -38,6 +39,15 @@ object Notifier {
     private fun ensureChannels() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         val nm = appContext?.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager ?: return
+
+        if (nm.getNotificationChannel(CH_PRIVATE_CALL) == null) {
+            nm.createNotificationChannel(NotificationChannel(CH_PRIVATE_CALL, "Llamadas de radio privada", NotificationManager.IMPORTANCE_HIGH).apply {
+                description = "Llamadas entrantes de radio privada"
+                enableVibration(true)
+                vibrationPattern = longArrayOf(0, 500, 300, 500, 300, 500)
+                enableLights(true); lightColor = RED
+            })
+        }
 
         // Crítica con sonido (heads-up + sonido + vibración + luz).
         if (nm.getNotificationChannel(CH_ALERT_CRIT) == null) {
@@ -92,6 +102,35 @@ object Notifier {
             ctx, 0, open,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
+    }
+
+    fun notifyPrivateCall(callId: String, callerName: String) {
+        val ctx = appContext ?: return
+        if (!NotificationManagerCompat.from(ctx).areNotificationsEnabled()) return
+        fun actionIntent(accept: Boolean): PendingIntent {
+            val intent = ctx.packageManager.getLaunchIntentForPackage(ctx.packageName)
+                ?.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                ?.putExtra("private_call_action", if (accept) "answer" else "decline")
+                ?.putExtra("private_call_id", callId)
+            return PendingIntent.getActivity(ctx, (callId + accept).hashCode(), intent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+        }
+        val notification = NotificationCompat.Builder(ctx, CH_PRIVATE_CALL)
+            .setSmallIcon(R.drawable.ic_stat_alert).setColor(RED)
+            .setContentTitle("Llamada de radio privada")
+            .setContentText("$callerName quiere hablar contigo")
+            .setCategory(NotificationCompat.CATEGORY_CALL)
+            .setPriority(NotificationCompat.PRIORITY_MAX)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            .setOngoing(true).setAutoCancel(false)
+            .setContentIntent(openAppIntent())
+            .addAction(0, "Rechazar", actionIntent(false))
+            .addAction(0, "Contestar", actionIntent(true)).build()
+        runCatching { NotificationManagerCompat.from(ctx).notify(callId.hashCode(), notification) }
+    }
+
+    fun cancelPrivateCall(callId: String) {
+        appContext?.let { runCatching { NotificationManagerCompat.from(it).cancel(callId.hashCode()) } }
     }
 
     /** Lanza (o actualiza) la notificación de una alerta recibida en vivo. */

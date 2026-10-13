@@ -4,6 +4,7 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
+import androidx.lifecycle.lifecycleScope
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
@@ -14,7 +15,11 @@ import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -41,6 +46,7 @@ import com.syemape.radio.ui.screens.RadioScreen
 import com.syemape.radio.ui.theme.MapeColors
 import com.syemape.radio.ui.theme.MapeTheme
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -49,6 +55,7 @@ class MainActivity : ComponentActivity() {
         com.syemape.radio.data.Prefs.init(applicationContext)
         com.syemape.radio.data.Notifier.init(applicationContext)
         SessionManager.bootstrap()
+        handlePrivateCallIntent(intent)
         enableEdgeToEdge()
         setContent {
             var darkMode by remember { mutableStateOf(com.syemape.radio.data.Prefs.darkMode) }
@@ -76,10 +83,34 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+
+    override fun onNewIntent(intent: android.content.Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handlePrivateCallIntent(intent)
+    }
+
+    private fun handlePrivateCallIntent(intent: android.content.Intent?) {
+        val action = intent?.getStringExtra("private_call_action") ?: return
+        val callId = intent.getStringExtra("private_call_id") ?: return
+        intent.removeExtra("private_call_action")
+        intent.removeExtra("private_call_id")
+        lifecycleScope.launch {
+            repeat(40) {
+                val call = com.syemape.radio.data.RadioManager.privateCall
+                if (call?.callId == callId && call.phase == "INCOMING") {
+                    com.syemape.radio.data.RadioManager.answerPrivateCall(action == "answer", callId)
+                    return@launch
+                }
+                delay(500)
+            }
+        }
+    }
 }
 
 @Composable
 private fun AppRoot(onDarkModeChanged: (Boolean) -> Unit) {
+    val appContext = androidx.compose.ui.platform.LocalContext.current
     val topInset = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
     val bottomInset = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
     val scope = rememberCoroutineScope()
@@ -93,6 +124,20 @@ private fun AppRoot(onDarkModeChanged: (Boolean) -> Unit) {
     var openChannelChat by remember { mutableStateOf<Pair<String, String>?>(null) }
     var openPrivateRadio by remember { mutableStateOf<Pair<String, String>?>(null) }
     var openSub by remember { mutableStateOf<String?>(null) }
+    val privateCall = com.syemape.radio.data.RadioManager.privateCall
+
+    LaunchedEffect(privateCall?.callId, privateCall?.phase) {
+        val call = privateCall ?: return@LaunchedEffect
+        when (call.phase) {
+            "ACTIVE" -> openPrivateRadio = call.conversationId to call.peerName
+            "DECLINED", "TIMEOUT", "CANCELLED", "DISCONNECTED", "ENDED", "FAILED" -> {
+                if (openPrivateRadio?.first == call.conversationId) openPrivateRadio = null
+                call.reason?.takeIf { it.isNotBlank() }?.let { android.widget.Toast.makeText(appContext, it, android.widget.Toast.LENGTH_LONG).show() }
+                delay(1800)
+                com.syemape.radio.data.RadioManager.clearPrivateCall(call.callId)
+            }
+        }
+    }
 
     when (SessionManager.status) {
         AuthStatus.Loading -> Box(
@@ -123,7 +168,7 @@ private fun AppRoot(onDarkModeChanged: (Boolean) -> Unit) {
           BackHandler(enabled = true) {
               when {
                   openSub != null -> openSub = null
-                  openPrivateRadio != null -> openPrivateRadio = null
+                  openPrivateRadio != null -> { com.syemape.radio.data.RadioManager.endPrivateCall(); openPrivateRadio = null }
                   openChannelChat != null -> openChannelChat = null
                   openChat != null -> openChat = null
                   tab != Tab.Mapa -> {
@@ -194,7 +239,7 @@ private fun AppRoot(onDarkModeChanged: (Boolean) -> Unit) {
                     conversationId = privateRadio.first,
                     peerName = privateRadio.second,
                     topPadding = topInset,
-                    onBack = { openPrivateRadio = null },
+                    onBack = { com.syemape.radio.data.RadioManager.endPrivateCall(); openPrivateRadio = null },
                 )
             } else if (channelChat != null) {
                 com.syemape.radio.ui.screens.ChannelChatScreen(
@@ -219,7 +264,7 @@ private fun AppRoot(onDarkModeChanged: (Boolean) -> Unit) {
                         topInset,
                         bottomInset,
                         onOpenChannelChat = { id, name -> openChannelChat = id to name },
-                        onOpenPrivateRadio = { id, name -> openPrivateRadio = id to name },
+                        onOpenPrivateRadio = { id, peerId, name -> com.syemape.radio.data.RadioManager.startPrivateCall(id, peerId, name) },
                         onOpenSettings = { openSub = "settings" },
                     )
                     Tab.Chats -> ChatsScreen(
@@ -242,6 +287,21 @@ private fun AppRoot(onDarkModeChanged: (Boolean) -> Unit) {
                     onSelect = { tab = it; com.syemape.radio.data.Prefs.lastTab = it.name },
                 )
             }
+          }
+          when (privateCall?.phase) {
+              "INCOMING" -> AlertDialog(
+                  onDismissRequest = { com.syemape.radio.data.RadioManager.answerPrivateCall(false, privateCall.callId) },
+                  title = { Text("Llamada de radio privada") },
+                  text = { Text("${privateCall.peerName} quiere hablar contigo. ¿Contestas?") },
+                  confirmButton = { TextButton(onClick = { com.syemape.radio.data.RadioManager.answerPrivateCall(true, privateCall.callId) }) { Text("Contestar") } },
+                  dismissButton = { TextButton(onClick = { com.syemape.radio.data.RadioManager.answerPrivateCall(false, privateCall.callId) }) { Text("Rechazar") } },
+              )
+              "OUTGOING" -> AlertDialog(
+                  onDismissRequest = { com.syemape.radio.data.RadioManager.endPrivateCall() },
+                  title = { Text("Llamando…") },
+                  text = { Text("Esperando que ${privateCall.peerName} conteste") },
+                  confirmButton = { TextButton(onClick = { com.syemape.radio.data.RadioManager.endPrivateCall() }) { Text("Cancelar llamada") } },
+              )
           }
         }
     }
