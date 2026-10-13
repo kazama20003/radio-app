@@ -231,6 +231,7 @@ fun RadioScreen(
                     lastPlaying && notesProgress.second > 0 -> "Reproduciendo ${notesProgress.first}/${notesProgress.second}"
                     else -> "Reproducir 3 notas recientes"
                 },
+                notesAvailable = lastNote != null,
                 notesLoading = lastLoading,
                 notesPlaying = lastPlaying,
                 onOpenChat = { RadioManager.channelId?.let { onOpenChannelChat(it, RadioManager.channelName) } },
@@ -567,6 +568,7 @@ private fun OnlinePulseDot(modifier: Modifier = Modifier) {
 @Composable
 private fun RadioSpeakerStatus(
     notesLabel: String,
+    notesAvailable: Boolean,
     notesLoading: Boolean,
     notesPlaying: Boolean,
     onOpenChat: () -> Unit,
@@ -602,14 +604,16 @@ private fun RadioSpeakerStatus(
                 .clickable(onClick = onOpenChat),
             contentAlignment = Alignment.Center,
         ) { Icon(MapeIcons.Chat, "Chat del canal", tint = Color(0xFFD71920), modifier = Modifier.size(18.dp)) }
-        Box(
-            Modifier.size(34.dp).clip(CircleShape).background(RadioColors.Ink.copy(alpha = 0.12f))
-                .clickable(enabled = !notesLoading, onClick = onPlayNotes),
-            contentAlignment = Alignment.Center,
-        ) {
-            if (notesLoading) androidx.compose.material3.CircularProgressIndicator(
-                modifier = Modifier.size(17.dp), color = Color(0xFFD71920), strokeWidth = 2.dp,
-            ) else Icon(if (notesPlaying) MapeIcons.Pause else MapeIcons.Play, notesLabel, tint = Color(0xFFD71920), modifier = Modifier.size(18.dp))
+        if (notesAvailable) {
+            Box(
+                Modifier.size(34.dp).clip(CircleShape).background(RadioColors.Ink.copy(alpha = 0.12f))
+                    .clickable(enabled = !notesLoading, onClick = onPlayNotes),
+                contentAlignment = Alignment.Center,
+            ) {
+                if (notesLoading) androidx.compose.material3.CircularProgressIndicator(
+                    modifier = Modifier.size(17.dp), color = Color(0xFFD71920), strokeWidth = 2.dp,
+                ) else Icon(if (notesPlaying) MapeIcons.Pause else MapeIcons.Play, notesLabel, tint = Color(0xFFD71920), modifier = Modifier.size(18.dp))
+            }
         }
     }
 }
