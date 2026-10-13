@@ -73,6 +73,7 @@ fun PrivateRadioScreen(
     val context = LocalContext.current
     var latestVoice by remember(conversationId) { mutableStateOf<Message?>(null) }
     var playingId by remember { mutableStateOf<String?>(null) }
+    var loadingVoiceId by remember { mutableStateOf<String?>(null) }
 
     DisposableEffect(conversationId, peerName) {
         RadioManager.enterPrivateRadio(conversationId, peerName)
@@ -168,23 +169,44 @@ fun PrivateRadioScreen(
         ) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 Box(Modifier.size(40.dp).clip(CircleShape).background(if (note == null) Color(0xFF303030) else Color(0xFF382022))
-                    .then(if (note != null) Modifier.clickable {
+                    .then(if (note != null) Modifier.clickable(enabled = loadingVoiceId != note.id) {
                         val key = note.attachmentKey.orEmpty()
                         val url = when {
                             key.startsWith("http") -> key
                             key.startsWith("/") -> BuildConfig.API_BASE_URL.substringBefore("/api") + key
                             else -> null
                         }
-                        if (url != null) RadioManager.playVoiceNote(url, note.id, onState = { playingId = it })
+                        if (url != null) RadioManager.playVoiceNote(
+                            url,
+                            note.id,
+                            onState = { playingId = it; loadingVoiceId = null },
+                            onLoading = { loadingVoiceId = note.id },
+                            onError = {
+                                loadingVoiceId = null
+                                android.widget.Toast.makeText(
+                                    context,
+                                    "La radio está ocupada o el audio Bluetooth aún conecta. Intenta de nuevo.",
+                                    android.widget.Toast.LENGTH_SHORT,
+                                ).show()
+                            },
+                        )
                     } else Modifier), contentAlignment = Alignment.Center) {
-                    Icon(if (playingId == note?.id && note != null) MapeIcons.Pause else MapeIcons.Play,
-                        contentDescription = if (note == null) "Sin nota grabada" else "Reproducir nota privada",
-                        tint = if (note == null) PrivateMuted else Color(0xFFFF646A), modifier = Modifier.size(19.dp))
+                    if (loadingVoiceId == note?.id && note != null) {
+                        androidx.compose.material3.CircularProgressIndicator(modifier = Modifier.size(18.dp), color = Color(0xFFFF7777), strokeWidth = 2.dp)
+                    } else {
+                        Icon(if (playingId == note?.id && note != null) MapeIcons.Pause else MapeIcons.Play,
+                            contentDescription = if (note == null) "Sin nota grabada" else "Reproducir nota privada",
+                            tint = if (note == null) PrivateMuted else Color(0xFFFF646A), modifier = Modifier.size(19.dp))
+                    }
                 }
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     Text(if (note == null) "ÚLTIMA NOTA DE VOZ" else "NOTA PRIVADA · ${note.sender?.nickname?.takeIf { it.isNotBlank() } ?: note.sender?.name ?: "Usuario"}",
                         color = if (note == null) PrivateMuted else Color(0xFFFF7777), fontFamily = Outfit, fontWeight = FontWeight.Bold, fontSize = 10.sp, maxLines = 1)
-                    Text(if (note == null) "Tu transmisión aparecerá aquí al terminar" else "${Fmt.shortTime(note.createdAt)} · ${note.durationSec ?: 0} s · Guardada en este privado",
+                    Text(when {
+                        note == null -> "Tu transmisión aparecerá aquí al terminar"
+                        loadingVoiceId == note.id -> "Conectando audio Bluetooth…"
+                        else -> "${Fmt.shortTime(note.createdAt)} · ${note.durationSec ?: 0} s · Guardada en este privado"
+                    },
                         color = PrivateText, fontFamily = Outfit, fontSize = 11.sp, maxLines = 1)
                 }
             }

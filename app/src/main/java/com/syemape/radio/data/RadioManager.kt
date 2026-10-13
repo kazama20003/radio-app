@@ -1762,8 +1762,36 @@ object RadioManager {
                     runCatching { it.release() }
                     return@setOnPreparedListener
                 }
-                it.start()
-                ui.launch { onState(id) }
+                val preparedPlayer = it
+                if (audioSessionActive && !speakerOn) {
+                    // En radio privada el reproductor usa la ruta de comunicación.
+                    // Espera a que SCO/BLE quede realmente seleccionado antes de
+                    // empezar; si no, la nota corre por el teléfono y al auricular
+                    // llega solo el final cuando Android termina el cambio de ruta.
+                    Thread({
+                        val routeReady = runCatching { awaitSelectedCommunicationRoute() }.getOrDefault(false)
+                        ui.launch {
+                            if (notePlayer !== preparedPlayer) return@launch
+                            if (!routeReady) {
+                                android.util.Log.w(TAG, "No se reproduce la nota hasta que la ruta Bluetooth/auricular esté lista")
+                                stopVoiceNote(onState)
+                                if (onError != null) onError() else onState(null)
+                                return@launch
+                            }
+                            runCatching {
+                                preparedPlayer.start()
+                                onState(id)
+                            }.onFailure {
+                                android.util.Log.e(TAG, "No se pudo iniciar la nota con la ruta de audio lista", it)
+                                stopVoiceNote(onState)
+                                if (onError != null) onError() else onState(null)
+                            }
+                        }
+                    }, "mape-private-note-route").apply { isDaemon = true }.start()
+                } else {
+                    preparedPlayer.start()
+                    ui.launch { onState(id) }
+                }
             }
             mp.setOnCompletionListener {
                 stopVoiceNote(onState)
