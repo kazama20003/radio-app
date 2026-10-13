@@ -212,36 +212,6 @@ fun RadioScreen(
                 lastLoading = false
                 notesProgress = 0 to 0
             }
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(9.dp)) {
-                RadioActionCard(
-                    icon = MapeIcons.Chat,
-                    label = "Chat del canal",
-                    modifier = Modifier.weight(1f),
-                    onClick = {
-                        RadioManager.channelId?.let { onOpenChannelChat(it, RadioManager.channelName) }
-                    },
-                )
-                if (lastNote != null) {
-                    RadioActionCard(
-                        icon = if (lastPlaying) MapeIcons.Pause else MapeIcons.Play,
-                        label = when {
-                            lastLoading && notesProgress.second > 0 -> "Cargando ${notesProgress.first}/${notesProgress.second}"
-                            lastLoading -> "Buscando audios…"
-                            lastPlaying && notesProgress.second > 0 -> "Nota ${notesProgress.first}/${notesProgress.second} · pausar"
-                            else -> "3 notas recientes"
-                        },
-                        modifier = Modifier.weight(1.35f),
-                        loading = lastLoading,
-                        onClick = {
-                            RadioManager.playLastThreeVoiceNotes(
-                                onState = { id -> lastPlaying = id != null },
-                                onLoading = { lastLoading = it },
-                                onProgress = { current, total -> notesProgress = current to total },
-                            )
-                        },
-                    )
-                }
-            }
             Box(
                 Modifier.fillMaxWidth().height(38.dp).clip(RoundedCornerShape(12.dp))
                     .background(RadioColors.Card).padding(horizontal = 8.dp, vertical = 4.dp),
@@ -254,7 +224,24 @@ fun RadioScreen(
                 )
             }
 
-            RadioSpeakerStatus()
+            RadioSpeakerStatus(
+                notesLabel = when {
+                    lastLoading && notesProgress.second > 0 -> "Descargando audios ${notesProgress.first}/${notesProgress.second}"
+                    lastLoading -> "Descargando notas recientes"
+                    lastPlaying && notesProgress.second > 0 -> "Reproduciendo ${notesProgress.first}/${notesProgress.second}"
+                    else -> "Reproducir 3 notas recientes"
+                },
+                notesLoading = lastLoading,
+                notesPlaying = lastPlaying,
+                onOpenChat = { RadioManager.channelId?.let { onOpenChannelChat(it, RadioManager.channelName) } },
+                onPlayNotes = {
+                    if (lastNote != null) RadioManager.playLastThreeVoiceNotes(
+                        onState = { id -> lastPlaying = id != null },
+                        onLoading = { lastLoading = it },
+                        onProgress = { current, total -> notesProgress = current to total },
+                    )
+                },
+            )
 
             Row(
                 Modifier.fillMaxWidth().clip(CircleShape).background(RadioColors.Card).padding(3.dp),
@@ -559,7 +546,6 @@ private fun ConnectedAlias(alias: String, modifier: Modifier = Modifier) {
     ) {
         OnlinePulseDot(Modifier.size(6.dp))
         Text(alias, color = RadioColors.Text, fontFamily = Outfit, fontWeight = FontWeight.SemiBold, fontSize = 10.sp, maxLines = 1)
-        Icon(MapeIcons.Radio, contentDescription = "Radio privada", tint = Color(0xFFE5322D), modifier = Modifier.size(15.dp))
     }
 }
 
@@ -579,30 +565,13 @@ private fun OnlinePulseDot(modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun RadioActionCard(
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    label: String,
-    modifier: Modifier,
-    loading: Boolean = false,
-    onClick: () -> Unit,
+private fun RadioSpeakerStatus(
+    notesLabel: String,
+    notesLoading: Boolean,
+    notesPlaying: Boolean,
+    onOpenChat: () -> Unit,
+    onPlayNotes: () -> Unit,
 ) {
-    Row(
-        modifier.height(43.dp).clip(RoundedCornerShape(14.dp)).background(RadioColors.Card)
-            .clickable(onClick = onClick)
-            .padding(horizontal = 11.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.Center,
-    ) {
-        if (loading) androidx.compose.material3.CircularProgressIndicator(
-            modifier = Modifier.size(15.dp), color = Color(0xFFD71920), strokeWidth = 2.dp,
-        ) else Icon(icon, null, tint = Color(0xFFD71920), modifier = Modifier.size(18.dp))
-        Spacer(Modifier.width(7.dp))
-        Text(label, color = RadioColors.Text, fontFamily = Outfit, fontWeight = FontWeight.SemiBold, fontSize = 11.sp, maxLines = 1)
-    }
-}
-
-@Composable
-private fun RadioSpeakerStatus() {
     val label = when {
         RadioManager.talking -> "TRANSMITIENDO"
         RadioManager.remoteSpeaking -> "HABLANDO AHORA"
@@ -627,6 +596,20 @@ private fun RadioSpeakerStatus() {
         Column(Modifier.weight(1f)) {
             Text(label, color = Color(0xFFD71920), fontFamily = Outfit, fontWeight = FontWeight.Bold, fontSize = 10.sp)
             Text(name, color = RadioColors.Text, fontFamily = Outfit, fontWeight = FontWeight.SemiBold, fontSize = 14.sp, maxLines = 1)
+        }
+        Box(
+            Modifier.size(34.dp).clip(CircleShape).background(RadioColors.Ink.copy(alpha = 0.12f))
+                .clickable(onClick = onOpenChat),
+            contentAlignment = Alignment.Center,
+        ) { Icon(MapeIcons.Chat, "Chat del canal", tint = Color(0xFFD71920), modifier = Modifier.size(18.dp)) }
+        Box(
+            Modifier.size(34.dp).clip(CircleShape).background(RadioColors.Ink.copy(alpha = 0.12f))
+                .clickable(enabled = !notesLoading, onClick = onPlayNotes),
+            contentAlignment = Alignment.Center,
+        ) {
+            if (notesLoading) androidx.compose.material3.CircularProgressIndicator(
+                modifier = Modifier.size(17.dp), color = Color(0xFFD71920), strokeWidth = 2.dp,
+            ) else Icon(if (notesPlaying) MapeIcons.Pause else MapeIcons.Play, notesLabel, tint = Color(0xFFD71920), modifier = Modifier.size(18.dp))
         }
     }
 }

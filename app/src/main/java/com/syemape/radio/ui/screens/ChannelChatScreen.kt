@@ -25,6 +25,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
@@ -48,6 +49,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -62,6 +64,7 @@ import coil.compose.SubcomposeAsyncImage
 import coil.compose.SubcomposeAsyncImageContent
 import com.syemape.radio.BuildConfig
 import com.syemape.radio.data.Backend
+import com.syemape.radio.data.CreateConversationRequest
 import com.syemape.radio.data.Fmt
 import com.syemape.radio.data.MediaUploader
 import com.syemape.radio.data.RadioTransmission
@@ -448,6 +451,35 @@ fun ChannelChatScreen(channelId: String, title: String, topPadding: Dp, bottomPa
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                         Icon(MapeIcons.Mic, null, tint = MapeColors.Red, modifier = Modifier.size(13.dp))
                         Text("Al aire · $liveTalker", color = MapeColors.Red, fontFamily = Outfit, fontWeight = FontWeight.SemiBold, fontSize = 11.sp, maxLines = 1)
+                    }
+                }
+                val activeUsers = com.syemape.radio.data.RadioManager.connectedUsers
+                    .filter { it.id.isNotBlank() && it.id != meId }
+                if (activeUsers.isNotEmpty()) {
+                    Text("Activos · toca para radio privada", color = MapeColors.TextMuted, fontFamily = Outfit, fontSize = 10.sp)
+                    LazyRow(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        items(activeUsers, key = { it.id }) { user ->
+                            val label = user.nickname?.takeIf { it.isNotBlank() } ?: user.name ?: "Operador"
+                            Row(
+                                Modifier.clip(CircleShape).background(Color(0xFFE8F5EC)).clickable {
+                                    scope.launch {
+                                        runCatching {
+                                            Backend.api.createConversation(CreateConversationRequest(type = "DIRECT", memberIds = listOf(user.id)))
+                                        }.onSuccess { convo ->
+                                            com.syemape.radio.data.RadioManager.startPrivateCall(convo.id, user.id, label)
+                                        }.onFailure { toast("No se pudo iniciar la radio privada con $label") }
+                                    }
+                                }.padding(horizontal = 8.dp, vertical = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(5.dp),
+                            ) {
+                                Box(Modifier.size(7.dp).clip(CircleShape).background(Color(0xFF22C55E)))
+                                Text(label, color = MapeColors.Text, fontFamily = Outfit, fontWeight = FontWeight.SemiBold, fontSize = 10.sp, maxLines = 1)
+                            }
+                        }
                     }
                 }
             }

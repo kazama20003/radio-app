@@ -667,6 +667,11 @@ private fun OperatorMarker(p: LivePerson, selected: Boolean, isMe: Boolean, phot
                     modifier = Modifier.size(avatarSize - 3.dp).clip(CircleShape), contentScale = ContentScale.Crop,
                 )
             }
+            // Estas personas llegan de la lista de presencia/ubicaciones en vivo.
+            Box(
+                Modifier.align(Alignment.BottomEnd).size(10.dp).clip(CircleShape)
+                    .background(Color(0xFF22C55E)).border(1.5.dp, MapeColors.White, CircleShape),
+            )
         }
         if (selected) {
             Spacer(Modifier.height(3.dp))
