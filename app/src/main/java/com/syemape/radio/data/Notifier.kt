@@ -149,6 +149,7 @@ object Notifier {
     fun notifyActivePrivateCall(callId: String, peerName: String) {
         val ctx = appContext ?: return
         if (!NotificationManagerCompat.from(ctx).areNotificationsEnabled()) return
+        runCatching { NotificationManagerCompat.from(ctx).cancel(callId.hashCode()) }
         fun intent(action: String): PendingIntent {
             val launch = ctx.packageManager.getLaunchIntentForPackage(ctx.packageName)
                 ?.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
