@@ -1612,7 +1612,13 @@ object RadioManager {
         onLoading: (Boolean) -> Unit = {},
         onProgress: (Int, Int) -> Unit = { _, _ -> },
     ) {
-        if (recentVoiceQueue.isNotEmpty() || recentVoiceFetchActive) {
+        val recentNoteIsPlaying = notePlayingId?.let { playingId ->
+            recentVoiceQueue.any { it.id == playingId }
+        } == true
+        // Una cola puede sobrevivir a la pantalla aunque el reproductor ya haya
+        // terminado o haya sido interrumpido. No conviertas el primer toque en
+        // una acción de limpiar esa cola obsoleta: debe iniciar la reproducción.
+        if (recentVoiceFetchActive || recentNoteIsPlaying) {
             recentVoiceGeneration++
             recentVoiceQueue = emptyList()
             recentVoiceFetchActive = false
@@ -1620,6 +1626,7 @@ object RadioManager {
             stopVoiceNote(onState)
             return
         }
+        recentVoiceQueue = emptyList()
         val cid = channelId
         if (cid.isNullOrBlank()) { onLoading(false); onState(null); return }
         val generation = ++recentVoiceGeneration
