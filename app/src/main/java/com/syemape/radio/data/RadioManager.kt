@@ -1127,7 +1127,7 @@ object RadioManager {
     private fun hasConsumerForChannel(sourceChannelId: String): Boolean =
         consumerChannelIds.values.any { it == sourceChannelId }
 
-    /** Chirrido de grillo al abrir/cerrar PTT; reproducción aparte para no retrasar la voz. */
+    /** Tono de radio de frecuencias alternadas al abrir/cerrar PTT. */
     private fun beep(durationMs: Int, waitUntilPlayed: Boolean = false) {
         if (Prefs.radioSound == false) return
         chirpsInFlight.incrementAndGet()
@@ -1135,31 +1135,28 @@ object RadioManager {
             var track: android.media.AudioTrack? = null
             try {
                 val sampleRate = 24_000
-                // Varias notas agudas con ataque y caída corta, para que suene a grillo.
-                val chirpMs = when {
-                    durationMs >= 200 -> 48
-                    durationMs >= 140 -> 36
-                    else -> 28
+                // Patrón corto de radio: al transmitir sube y confirma; al soltar
+                // responde con dos tonos descendentes. No es una versión alargada del grillo.
+                val frequencies = if (durationMs >= 200) {
+                    doubleArrayOf(880.0, 1320.0, 990.0)
+                } else {
+                    doubleArrayOf(1320.0, 880.0)
                 }
-                val gapMs = if (durationMs >= 200) 26 else 22
-                val chirpCount = when {
-                    durationMs >= 200 -> 7
-                    durationMs >= 140 -> 6
-                    else -> 3
-                }
-                val chirpSamples = sampleRate * chirpMs / 1000
-                val periodSamples = sampleRate * (chirpMs + gapMs) / 1000
-                val totalSamples = periodSamples * (chirpCount - 1) + chirpSamples
+                val toneMs = if (durationMs >= 200) 48 else 40
+                val gapMs = 16
+                val toneSamples = sampleRate * toneMs / 1000
+                val periodSamples = sampleRate * (toneMs + gapMs) / 1000
+                val totalSamples = periodSamples * (frequencies.size - 1) + toneSamples
                 val pcm = ShortArray(totalSamples)
                 for (i in pcm.indices) {
                     val within = i % periodSamples
-                    if (within >= chirpSamples) continue
-                    val edge = minOf(within, chirpSamples - within - 1)
-                    val envelope = (edge / (sampleRate * 0.003f)).coerceIn(0f, 1f)
-                    val progress = within.toDouble() / chirpSamples
-                    val frequency = 3_200.0 + 1_050.0 * progress + 260.0 * kotlin.math.sin(progress * Math.PI)
-                    val sample = kotlin.math.sin(2.0 * Math.PI * frequency * within / sampleRate)
-                    pcm[i] = (sample * envelope * 0.98 * Short.MAX_VALUE).toInt().toShort()
+                    val toneIndex = i / periodSamples
+                    if (toneIndex >= frequencies.size || within >= toneSamples) continue
+                    val edge = minOf(within, toneSamples - within - 1)
+                    val envelope = (edge / (sampleRate * 0.005f)).coerceIn(0f, 1f)
+                    val phase = 2.0 * Math.PI * frequencies[toneIndex] * within / sampleRate
+                    val sample = kotlin.math.sin(phase)
+                    pcm[i] = (sample * envelope * 0.72 * Short.MAX_VALUE).toInt().toShort()
                 }
                 val audioFormat = android.media.AudioFormat.Builder()
                     .setSampleRate(sampleRate)
@@ -1257,7 +1254,7 @@ object RadioManager {
             }
         }
         if (waitUntilPlayed) playback.run()
-        else runCatching { Thread(playback, "mape-cricket-chirp").apply { isDaemon = true }.start() }
+        else runCatching { Thread(playback, "mape-radio-ptt-tone").apply { isDaemon = true }.start() }
             .onFailure {
                 chirpsInFlight.decrementAndGet()
                 android.util.Log.e(TAG, "No se pudo iniciar el chirrido PTT", it)

@@ -181,7 +181,7 @@ fun AppSettingsScreen(topPadding: Dp, onDarkModeChanged: (Boolean) -> Unit, onBa
             else {
                 item { ToggleRow("Ubicación en vivo", "Comparte tu posición en el mapa", cur.liveLocation) { patch("liveLocation", it) { c -> c.copy(liveLocation = it) } } }
                 item { ToggleRow("Mapa de tránsito", "Muestra el tráfico en el mapa", cur.transitMap) { patch("transitMap", it) { c -> c.copy(transitMap = it) } } }
-                item { ToggleRow("Sonido de radio", "Chirrido de grillo al iniciar PTT", cur.radioSound) {
+                item { ToggleRow("Sonido de radio", "Tono corto al pulsar PTT", cur.radioSound) {
                     com.syemape.radio.data.Prefs.radioSound = it
                     patch("radioSound", it) { c -> c.copy(radioSound = it) }
                 } }
