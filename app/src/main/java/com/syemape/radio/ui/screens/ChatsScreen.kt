@@ -33,10 +33,17 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.runtime.rememberCoroutineScope
+import coil.compose.AsyncImage
 import com.syemape.radio.data.Backend
 import com.syemape.radio.data.Conversation
+import com.syemape.radio.data.CreateConversationRequest
 import com.syemape.radio.data.Fmt
 import com.syemape.radio.data.SessionManager
+import com.syemape.radio.data.AuthUser
+import com.syemape.radio.data.LivePerson
+import com.syemape.radio.data.MiniUser
 import com.syemape.radio.ui.Avatar
 import com.syemape.radio.ui.MapeIcons
 import com.syemape.radio.ui.avatarColor
@@ -45,6 +52,7 @@ import com.syemape.radio.ui.pressScale
 import com.syemape.radio.ui.rememberAsync
 import com.syemape.radio.ui.theme.MapeColors
 import com.syemape.radio.ui.theme.Outfit
+import kotlinx.coroutines.launch
 
 private data class ChatDisplay(
     val id: String,
@@ -54,6 +62,12 @@ private data class ChatDisplay(
     val unread: Int,
     val group: Boolean,
     val activeCount: Int,
+)
+
+private data class ActiveChatPerson(
+    val id: String,
+    val name: String,
+    val photoUrl: String?,
 )
 
 private fun Conversation.toDisplay(meId: String?, radioOnlineIds: Set<String>): ChatDisplay {
@@ -78,8 +92,32 @@ fun ChatsScreen(
 ) {
     val meId = SessionManager.user?.id
     val result by rememberAsync { Backend.api.conversations() }
+    val personnelResult by rememberAsync { Backend.api.users() }
     val radioOnlineIds = com.syemape.radio.data.RadioManager.connectedUsers.mapTo(mutableSetOf()) { it.id }
     val convos = result?.getOrNull().orEmpty().map { it.toDisplay(meId, radioOnlineIds) }
+    val personnel = personnelResult?.getOrNull().orEmpty().filter { it.isActive }.associateBy { it.id }
+    val tracked = com.syemape.radio.data.TrackingManager.people.values.associateBy { it.id }
+    val radioUsers = com.syemape.radio.data.RadioManager.connectedUsers.associateBy { it.id }
+    val activeIds = buildSet {
+        personnel.values.filter { it.isOnline }.forEach { add(it.id) }
+        tracked.keys.forEach(::add)
+        radioUsers.keys.forEach(::add)
+    }.filter { it.isNotBlank() && it != meId }
+    val activePeople = activeIds.mapNotNull { id ->
+        val staff: AuthUser? = personnel[id]
+        val person: LivePerson? = tracked[id]
+        val radioUser: MiniUser? = radioUsers[id]
+        val name = staff?.nickname?.takeIf { it.isNotBlank() }
+            ?: staff?.name?.takeIf { it.isNotBlank() }
+            ?: person?.nickname?.takeIf { it.isNotBlank() }
+            ?: person?.name?.takeIf { it.isNotBlank() }
+            ?: radioUser?.nickname?.takeIf { it.isNotBlank() }
+            ?: radioUser?.name?.takeIf { it.isNotBlank() }
+            ?: return@mapNotNull null
+        ActiveChatPerson(id, name, staff?.photoUrl ?: person?.photoUrl ?: radioUser?.photoUrl)
+    }.distinctBy { it.id }.sortedBy { it.name.lowercase() }
+    val scope = rememberCoroutineScope()
+    val context = LocalContext.current
     // Canales de radio: se muestran como chats aparte (diferenciados) arriba de todo.
     val channelsResult by rememberAsync { Backend.api.radioChannels() }
     val channels = channelsResult?.getOrNull().orEmpty()
@@ -99,6 +137,56 @@ fun ChatsScreen(
             }
         }
         item { Spacer(Modifier.height(10.dp)) }
+        if (activePeople.isNotEmpty()) {
+            item {
+                Text("ACTIVOS", color = MapeColors.TextMuted, fontFamily = Outfit, fontWeight = FontWeight.SemiBold, fontSize = 12.sp, letterSpacing = 0.6.sp)
+            }
+            item {
+                androidx.compose.foundation.lazy.LazyRow(
+                    horizontalArrangement = Arrangement.spacedBy(14.dp),
+                    contentPadding = PaddingValues(vertical = 4.dp),
+                ) {
+                    items(activePeople, key = { "active-${it.id}" }) { person ->
+                        Column(
+                            Modifier.width(62.dp).pressScale {
+                                scope.launch {
+                                    val existing = result?.getOrNull()?.firstOrNull { conversation ->
+                                        conversation.type == "DIRECT" && conversation.members.any { it.user?.id == person.id }
+                                    }
+                                    if (existing != null) {
+                                        onOpenChat(existing.id, person.name)
+                                    } else {
+                                        runCatching {
+                                            Backend.api.createConversation(CreateConversationRequest(type = "DIRECT", memberIds = listOf(person.id)))
+                                        }.onSuccess { onOpenChat(it.id, person.name) }
+                                            .onFailure { android.widget.Toast.makeText(context, "No se pudo abrir el chat con ${person.name}", android.widget.Toast.LENGTH_SHORT).show() }
+                                    }
+                                }
+                            },
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(5.dp),
+                        ) {
+                            Box(Modifier.size(54.dp), contentAlignment = Alignment.Center) {
+                                if (!person.photoUrl.isNullOrBlank()) {
+                                    AsyncImage(
+                                        model = person.photoUrl,
+                                        contentDescription = "Foto de ${person.name}",
+                                        modifier = Modifier.size(50.dp).clip(CircleShape),
+                                    )
+                                } else {
+                                    Avatar(initialsOf(person.name), avatarColor(person.id), size = 50.dp)
+                                }
+                                Box(
+                                    Modifier.align(Alignment.BottomEnd).size(14.dp).clip(CircleShape)
+                                        .background(Color(0xFF20A957)).border(2.dp, MapeColors.Bg, CircleShape),
+                                )
+                            }
+                            Text(person.name, color = MapeColors.Text, fontFamily = Outfit, fontWeight = FontWeight.Medium, fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                    }
+                }
+            }
+        }
         if (channels.isNotEmpty()) {
             item {
                 Text(
@@ -117,8 +205,14 @@ fun ChatsScreen(
                         .padding(horizontal = 14.dp, vertical = 12.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Box(Modifier.size(48.dp).clip(CircleShape).background(MapeColors.Ink), contentAlignment = Alignment.Center) {
-                        Icon(MapeIcons.Radio, null, tint = MapeColors.White, modifier = Modifier.size(24.dp))
+                    Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {
+                        Box(Modifier.fillMaxSize().clip(CircleShape).background(MapeColors.Ink), contentAlignment = Alignment.Center) {
+                            Icon(MapeIcons.Radio, null, tint = MapeColors.White, modifier = Modifier.size(24.dp))
+                        }
+                        Box(
+                            Modifier.align(Alignment.BottomEnd).size(13.dp).clip(CircleShape)
+                                .background(Color(0xFF20A957)).border(2.dp, MapeColors.Card, CircleShape),
+                        )
                     }
                     Spacer(Modifier.width(12.dp))
                     Column(Modifier.weight(1f)) {
