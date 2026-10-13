@@ -1,6 +1,7 @@
 package com.syemape.radio.ui.screens
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -25,6 +26,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -51,16 +53,21 @@ private data class ChatDisplay(
     val time: String,
     val unread: Int,
     val group: Boolean,
+    val activeCount: Int,
 )
 
-private fun Conversation.toDisplay(meId: String?): ChatDisplay {
+private fun Conversation.toDisplay(meId: String?, radioOnlineIds: Set<String>): ChatDisplay {
     val group = type == "GROUP" || !title.isNullOrBlank()
     val other = members.firstOrNull { it.user?.id != meId }?.user
+    val activeCount = members.mapNotNull { it.user }
+        .filter { it.id != meId && (it.isOnline || it.id in radioOnlineIds) }
+        .distinctBy { it.id }
+        .size
     val name = title?.takeIf { it.isNotBlank() }
         ?: other?.nickname?.takeIf { it.isNotBlank() }
         ?: other?.name?.takeIf { it.isNotBlank() }
         ?: "Conversación"
-    return ChatDisplay(id, name, Fmt.preview(lastMessage), Fmt.shortTime(lastMessage?.createdAt ?: lastMessageAt), unread, group)
+    return ChatDisplay(id, name, Fmt.preview(lastMessage), Fmt.shortTime(lastMessage?.createdAt ?: lastMessageAt), unread, group, activeCount)
 }
 
 @Composable
@@ -71,7 +78,8 @@ fun ChatsScreen(
 ) {
     val meId = SessionManager.user?.id
     val result by rememberAsync { Backend.api.conversations() }
-    val convos = result?.getOrNull().orEmpty().map { it.toDisplay(meId) }
+    val radioOnlineIds = com.syemape.radio.data.RadioManager.connectedUsers.mapTo(mutableSetOf()) { it.id }
+    val convos = result?.getOrNull().orEmpty().map { it.toDisplay(meId, radioOnlineIds) }
     // Canales de radio: se muestran como chats aparte (diferenciados) arriba de todo.
     val channelsResult by rememberAsync { Backend.api.radioChannels() }
     val channels = channelsResult?.getOrNull().orEmpty()
@@ -104,6 +112,7 @@ fun ChatsScreen(
                 val chTitle = listOfNotNull(ch.name, ch.description).joinToString(" · ").ifBlank { "Canal" }
                 Row(
                     Modifier.fillMaxWidth().clip(RoundedCornerShape(22.dp)).background(MapeColors.Card)
+                    .border(1.dp, MapeColors.BorderLight, RoundedCornerShape(22.dp))
                         .pressScale { onOpenChannelChat(ch.id, chTitle) }
                         .padding(horizontal = 14.dp, vertical = 12.dp),
                     verticalAlignment = Alignment.CenterVertically,
@@ -142,15 +151,25 @@ fun ChatsScreen(
         }
         items(convos) { chat ->
             Row(
-                Modifier.fillMaxWidth().clip(RoundedCornerShape(22.dp)).background(MapeColors.Card).pressScale { onOpenChat(chat.id, chat.name) }.padding(horizontal = 14.dp, vertical = 12.dp),
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(22.dp)).background(MapeColors.Card)
+                    .border(1.dp, MapeColors.BorderLight, RoundedCornerShape(22.dp))
+                    .pressScale { onOpenChat(chat.id, chat.name) }.padding(horizontal = 14.dp, vertical = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                if (chat.group) {
-                    Box(Modifier.size(48.dp).clip(CircleShape).background(MapeColors.Red), contentAlignment = Alignment.Center) {
-                        Icon(MapeIcons.Truck, null, tint = MapeColors.White, modifier = Modifier.size(22.dp))
+                Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {
+                    if (chat.group) {
+                        Box(Modifier.fillMaxSize().clip(CircleShape).background(MapeColors.Red), contentAlignment = Alignment.Center) {
+                            Icon(MapeIcons.Truck, null, tint = MapeColors.White, modifier = Modifier.size(22.dp))
+                        }
+                    } else {
+                        Avatar(initialsOf(chat.name), avatarColor(chat.name), size = 48.dp)
                     }
-                } else {
-                    Avatar(initialsOf(chat.name), avatarColor(chat.name), size = 48.dp)
+                    if (chat.activeCount > 0) {
+                        Box(
+                            Modifier.align(Alignment.BottomEnd).size(13.dp).clip(CircleShape)
+                                .background(Color(0xFF20A957)).border(2.dp, MapeColors.Card, CircleShape),
+                        )
+                    }
                 }
                 Spacer(Modifier.width(12.dp))
                 Column(Modifier.weight(1f)) {
@@ -161,6 +180,16 @@ fun ChatsScreen(
                 Spacer(Modifier.width(8.dp))
                 Column(horizontalAlignment = Alignment.End) {
                     Text(chat.time, color = MapeColors.TextFaint, fontFamily = Outfit, fontSize = 12.sp)
+                    if (chat.activeCount > 0) {
+                        Spacer(Modifier.height(4.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Box(Modifier.size(7.dp).clip(CircleShape).background(Color(0xFF20A957)))
+                            Text(
+                                if (chat.group) "${chat.activeCount} activos" else "Activo ahora",
+                                color = Color(0xFF168443), fontFamily = Outfit, fontWeight = FontWeight.Medium, fontSize = 10.sp,
+                            )
+                        }
+                    }
                     if (chat.unread > 0) {
                         Spacer(Modifier.height(6.dp))
                         Box(Modifier.size(22.dp).clip(CircleShape).background(MapeColors.Red), contentAlignment = Alignment.Center) {
