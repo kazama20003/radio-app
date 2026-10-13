@@ -191,6 +191,13 @@ fun RadioScreen(
 
             RadioMemberCard { user ->
                 val myId = SessionManager.user?.id
+                val existingCall = RadioManager.privateCall
+                if (user.id.isNotBlank() && existingCall?.phase == "ACTIVE" && existingCall.peerId == user.id) {
+                    // Si se volvió a la lista mientras la llamada sigue activa, tocar
+                    // de nuevo a esa persona reabre su radio privada sin iniciar otra.
+                    RadioManager.requestOpenPrivateRadio(existingCall.callId)
+                    return@RadioMemberCard
+                }
                 if (user.id.isNotBlank() && user.id != myId) scope.launch {
                     runCatching {
                         Backend.api.createConversation(CreateConversationRequest(type = "DIRECT", memberIds = listOf(user.id)))

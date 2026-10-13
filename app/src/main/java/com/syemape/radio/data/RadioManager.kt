@@ -178,6 +178,7 @@ object RadioManager {
         socket.off("channel:important-changed")
         socket.off("private-radio:incoming")
         socket.off("private-radio:accepted")
+        socket.off("private-radio:resumed")
         socket.off("private-radio:declined")
         socket.off("private-radio:ended")
         socket.on("private-radio:incoming", Emitter.Listener { args ->
@@ -198,6 +199,25 @@ object RadioManager {
                 Notifier.cancelPrivateCall(current.callId)
                 privateCall = current.copy(phase = "ACTIVE", peerName = o.optString("peerName", current.peerName))
                 Notifier.notifyActivePrivateCall(current.callId, privateCall?.peerName ?: current.peerName)
+            }
+        })
+        socket.on("private-radio:resumed", Emitter.Listener { args ->
+            val o = args.firstOrNull() as? JSONObject ?: return@Listener
+            val id = o.optString("callId")
+            val conversationId = o.optString("conversationId")
+            val peerId = o.optString("peerId")
+            if (id.isBlank() || conversationId.isBlank() || peerId.isBlank()) return@Listener
+            ui.launch {
+                val current = privateCall
+                if (current == null || current.callId == id) {
+                    val peerName = o.optString("peerName").takeIf { it.isNotBlank() } ?: current?.peerName ?: "Usuario"
+                    val outgoing = o.optBoolean("outgoing", current?.outgoing ?: false)
+                    val phase = o.optString("phase").takeIf { it in setOf("ACTIVE", "OUTGOING", "INCOMING") }
+                        ?: if (current?.phase == "OUTGOING" || current?.phase == "INCOMING") current.phase else "ACTIVE"
+                    privateCall = PrivateRadioCallState(
+                        id, conversationId, peerId, peerName, phase, outgoing,
+                    )
+                }
             }
         })
         socket.on("private-radio:ended", Emitter.Listener { args ->
@@ -616,7 +636,26 @@ object RadioManager {
 
     fun startPrivateCall(conversationId: String, peerId: String, peerName: String) {
         val publicChannelId = channelId?.takeUnless { it.startsWith("private:") }
-        if (publicChannelId.isNullOrBlank() || peerId.isBlank() || privateCall?.phase in setOf("OUTGOING", "INCOMING", "ACTIVE")) return
+        if (peerId.isBlank() || conversationId.isBlank()) return
+        val currentCall = privateCall
+        if (currentCall?.phase == "ACTIVE") {
+            if (currentCall.peerId == peerId) requestOpenPrivateRadio(currentCall.callId)
+            else appRef?.let {
+                android.widget.Toast.makeText(it, "Termina la radio privada con ${currentCall.peerName} antes de llamar a otra persona", android.widget.Toast.LENGTH_SHORT).show()
+            }
+            return
+        }
+        if (currentCall != null && currentCall.phase in setOf("OUTGOING", "INCOMING")) {
+            appRef?.let {
+                val text = if (currentCall.phase == "INCOMING") "Contesta o rechaza la solicitud privada pendiente" else "Ya hay una solicitud de radio privada pendiente"
+                android.widget.Toast.makeText(it, text, android.widget.Toast.LENGTH_SHORT).show()
+            }
+            return
+        }
+        if (publicChannelId.isNullOrBlank()) {
+            appRef?.let { android.widget.Toast.makeText(it, "Conéctate a un canal público para llamar", android.widget.Toast.LENGTH_SHORT).show() }
+            return
+        }
         val callId = java.util.UUID.randomUUID().toString()
         privateCall = PrivateRadioCallState(callId, conversationId, peerId, peerName, "OUTGOING", true)
         socket.emit("private-radio:call", JSONObject().put("callId", callId).put("conversationId", conversationId)

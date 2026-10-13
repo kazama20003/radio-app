@@ -187,7 +187,10 @@ private fun AppRoot(onDarkModeChanged: (Boolean) -> Unit) {
           BackHandler(enabled = true) {
               when {
                   openSub != null -> openSub = null
-                  openPrivateRadio != null -> { openPrivateRadio = null }
+                  openPrivateRadio != null -> {
+                      com.syemape.radio.data.RadioManager.endPrivateCall()
+                      openPrivateRadio = null
+                  }
                   openChannelChat != null -> openChannelChat = null
                   openChat != null -> openChat = null
                   tab != Tab.Mapa -> {
@@ -258,7 +261,7 @@ private fun AppRoot(onDarkModeChanged: (Boolean) -> Unit) {
                     conversationId = privateRadio.first,
                     peerName = privateRadio.second,
                     topPadding = topInset,
-                    onBack = { openPrivateRadio = null },
+                    onBack = { com.syemape.radio.data.RadioManager.endPrivateCall(); openPrivateRadio = null },
                     onHangUp = { com.syemape.radio.data.RadioManager.endPrivateCall(); openPrivateRadio = null },
                 )
             } else if (channelChat != null) {
