@@ -1760,6 +1760,10 @@ object RadioManager {
             mp.setOnPreparedListener {
                 if (notePlayer !== it || talking || consuming || remoteProducerId != null || importantProducerIds.isNotEmpty()) {
                     runCatching { it.release() }
+                    if (notePlayer === it) {
+                        stopVoiceNote(onState)
+                        if (onError != null) onError() else onState(null)
+                    }
                     return@setOnPreparedListener
                 }
                 val preparedPlayer = it
@@ -1804,6 +1808,18 @@ object RadioManager {
             }
             onLoading?.invoke()
             mp.prepareAsync()
+            // MediaPlayer does not always report an error when a remote URL stalls
+            // during prepareAsync. Bound the loading state so the UI can retry.
+            ui.launch {
+                delay(20_000L)
+                val samePlayer = notePlayer === mp && notePlayingId == id
+                val stillPreparing = samePlayer && runCatching { !mp.isPlaying }.getOrDefault(true)
+                if (stillPreparing) {
+                    android.util.Log.w(TAG, "La preparación de la nota excedió 20 s; se libera para permitir reintentar")
+                    stopVoiceNote(onState)
+                    if (onError != null) onError() else onState(null)
+                }
+            }
         }.onFailure {
             stopVoiceNote(onState)
             if (onError != null) onError.invoke() else onCompletion?.invoke()
