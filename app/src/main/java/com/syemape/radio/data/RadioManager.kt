@@ -222,12 +222,13 @@ object RadioManager {
                             if (source.isNull(key)) null else source.optString(key).trim()
                                 .takeIf { it.isNotEmpty() && it != "null" }
                         }
-                        val id = str(obj, "id", "userId") ?: str(profile, "id", "userId") ?: ""
+                        val id = str(obj, "id", "userId", "publicId") ?: str(profile, "id", "userId", "publicId") ?: ""
                         val own = meUser()?.takeIf { it.id == id }
                         MiniUser(
                             id = id,
                             name = str(profile, "name", "fullName", "nombre") ?: own?.name,
                             nickname = str(profile, "nickname", "apelativo", "alias") ?: own?.nickname,
+                            isOnline = true,
                         )
                     }
                 } else null

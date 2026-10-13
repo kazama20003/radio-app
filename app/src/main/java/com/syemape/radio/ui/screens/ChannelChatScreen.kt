@@ -156,8 +156,21 @@ fun ChannelChatScreen(channelId: String, title: String, topPadding: Dp, bottomPa
         com.syemape.radio.data.RadioManager.remoteSpeaking -> com.syemape.radio.data.RadioManager.speakerLabel?.takeIf { it.isNotBlank() }
         else -> null
     }
+    val activeUsers = com.syemape.radio.data.RadioManager.connectedUsers
+        .filter { it.id.isNotBlank() && it.id != meId }
 
     fun toast(msg: String) = android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_SHORT).show()
+
+    fun startPrivateRadio(user: com.syemape.radio.data.MiniUser) {
+        val label = user.nickname?.takeIf { it.isNotBlank() } ?: user.name ?: "Operador"
+        scope.launch {
+            runCatching {
+                Backend.api.createConversation(CreateConversationRequest(type = "DIRECT", memberIds = listOf(user.id)))
+            }.onSuccess { convo ->
+                com.syemape.radio.data.RadioManager.startPrivateCall(convo.id, user.id, label)
+            }.onFailure { toast("No se pudo iniciar la radio privada con $label") }
+        }
+    }
 
     // Abre un archivo (video/documento) con una app externa (navegador/reproductor).
     fun openExternally(key: String?) {
@@ -453,35 +466,6 @@ fun ChannelChatScreen(channelId: String, title: String, topPadding: Dp, bottomPa
                         Text("Al aire · $liveTalker", color = MapeColors.Red, fontFamily = Outfit, fontWeight = FontWeight.SemiBold, fontSize = 11.sp, maxLines = 1)
                     }
                 }
-                val activeUsers = com.syemape.radio.data.RadioManager.connectedUsers
-                    .filter { it.id.isNotBlank() && it.id != meId }
-                if (activeUsers.isNotEmpty()) {
-                    Text("Activos · toca para radio privada", color = MapeColors.TextMuted, fontFamily = Outfit, fontSize = 10.sp)
-                    LazyRow(
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        items(activeUsers, key = { it.id }) { user ->
-                            val label = user.nickname?.takeIf { it.isNotBlank() } ?: user.name ?: "Operador"
-                            Row(
-                                Modifier.clip(CircleShape).background(Color(0xFFE8F5EC)).clickable {
-                                    scope.launch {
-                                        runCatching {
-                                            Backend.api.createConversation(CreateConversationRequest(type = "DIRECT", memberIds = listOf(user.id)))
-                                        }.onSuccess { convo ->
-                                            com.syemape.radio.data.RadioManager.startPrivateCall(convo.id, user.id, label)
-                                        }.onFailure { toast("No se pudo iniciar la radio privada con $label") }
-                                    }
-                                }.padding(horizontal = 8.dp, vertical = 4.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(5.dp),
-                            ) {
-                                Box(Modifier.size(7.dp).clip(CircleShape).background(Color(0xFF22C55E)))
-                                Text(label, color = MapeColors.Text, fontFamily = Outfit, fontWeight = FontWeight.SemiBold, fontSize = 10.sp, maxLines = 1)
-                            }
-                        }
-                    }
-                }
             }
         }
 
@@ -492,6 +476,39 @@ fun ChannelChatScreen(channelId: String, title: String, topPadding: Dp, bottomPa
                 contentPadding = PaddingValues(16.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
+            item(key = "channel-active-users") {
+                Column(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(MapeColors.Card)
+                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                    verticalArrangement = Arrangement.spacedBy(7.dp),
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                        Box(Modifier.size(8.dp).clip(CircleShape).background(Color(0xFF22C55E)))
+                        Text("USUARIOS ACTIVOS · ${activeUsers.size}", color = MapeColors.Text, fontFamily = Outfit, fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                        Text("· selecciona para radio privada", color = MapeColors.TextMuted, fontFamily = Outfit, fontSize = 10.sp)
+                    }
+                    if (activeUsers.isEmpty()) {
+                        Text("No hay otros usuarios conectados al canal", color = MapeColors.TextMuted, fontFamily = Outfit, fontSize = 12.sp)
+                    } else {
+                        LazyRow(horizontalArrangement = Arrangement.spacedBy(7.dp), verticalAlignment = Alignment.CenterVertically) {
+                            items(activeUsers, key = { "active-${it.id}" }) { user ->
+                                val label = user.nickname?.takeIf { it.isNotBlank() } ?: user.name ?: "Operador"
+                                Row(
+                                    Modifier.clip(CircleShape).background(Color(0xFFE8F5EC))
+                                        .clickable { startPrivateRadio(user) }
+                                        .padding(start = 9.dp, end = 8.dp, top = 6.dp, bottom = 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                ) {
+                                    Box(Modifier.size(7.dp).clip(CircleShape).background(Color(0xFF22C55E)))
+                                    Text(label, color = MapeColors.Text, fontFamily = Outfit, fontWeight = FontWeight.SemiBold, fontSize = 11.sp, maxLines = 1)
+                                    Icon(MapeIcons.UserPlus, "Iniciar radio privada con $label", tint = MapeColors.Red, modifier = Modifier.size(15.dp))
+                                }
+                            }
+                        }
+                    }
+                }
+            }
             var previousDay: String? = null
             items.forEach { t ->
                 val day = Fmt.dayKey(t.createdAt)

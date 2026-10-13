@@ -272,7 +272,7 @@ fun RadioScreen(
             ) {
                 // Phones with a short display get a smaller PTT target instead of
                 // pushing the microphone below the bottom navigation bar.
-                val micSize = minOf(maxWidth, maxHeight, 250.dp)
+                val micSize = minOf(maxWidth, maxHeight, 300.dp)
                 if (micSize > 0.dp) RadioPushToTalkButton(size = micSize)
             }
         }
@@ -547,6 +547,7 @@ private fun ConnectedAlias(alias: String, modifier: Modifier = Modifier) {
     ) {
         OnlinePulseDot(Modifier.size(6.dp))
         Text(alias, color = RadioColors.Text, fontFamily = Outfit, fontWeight = FontWeight.SemiBold, fontSize = 10.sp, maxLines = 1)
+        Icon(MapeIcons.UserPlus, contentDescription = "Seleccionar $alias para radio privada", tint = Color(0xFFD71920), modifier = Modifier.size(14.dp))
     }
 }
 
@@ -623,7 +624,7 @@ fun RadioPushToTalkButton(size: Dp) {
     val talking = RadioManager.talking
     val ready = RadioManager.connected // true solo cuando el canal de audio está listo
     val brandRed = Color(0xFFD71920)
-    val buttonSize = size * 0.89f
+    val buttonSize = size * 0.95f
     Box(contentAlignment = Alignment.Center) {
         Box(
             Modifier.size(size).clip(CircleShape)
@@ -664,7 +665,7 @@ fun RadioPushToTalkButton(size: Dp) {
             verticalArrangement = Arrangement.Center,
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            Icon(MapeIcons.Mic, null, tint = if (talking) Color.White else brandRed, modifier = Modifier.size((buttonSize * 0.35f).coerceAtMost(60.dp)))
+            Icon(MapeIcons.Mic, null, tint = if (talking) Color.White else brandRed, modifier = Modifier.size((buttonSize * 0.42f).coerceAtMost(82.dp)))
             Spacer(Modifier.height(buttonSize * 0.025f))
             Text(
                 when {
