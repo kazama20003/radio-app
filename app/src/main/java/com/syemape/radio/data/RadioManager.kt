@@ -1135,15 +1135,15 @@ object RadioManager {
             var track: android.media.AudioTrack? = null
             try {
                 val sampleRate = 24_000
-                // Al abrir: doble tono ascendente de permiso de transmisión (roger/beep).
+                // Al abrir: tres tonos ascendentes de permiso de transmisión, como radio.
                 // Al soltar: doble tono descendente de cortesía.
                 val frequencies = if (durationMs >= 200) {
-                    doubleArrayOf(980.0, 1480.0)
+                    doubleArrayOf(760.0, 1040.0, 1480.0)
                 } else {
                     doubleArrayOf(1320.0, 880.0)
                 }
-                val toneMs = if (durationMs >= 200) 68 else 40
-                val gapMs = if (durationMs >= 200) 20 else 16
+                val toneMs = if (durationMs >= 200) 96 else 40
+                val gapMs = if (durationMs >= 200) 24 else 16
                 val toneSamples = sampleRate * toneMs / 1000
                 val periodSamples = sampleRate * (toneMs + gapMs) / 1000
                 val totalSamples = periodSamples * (frequencies.size - 1) + toneSamples
