@@ -129,6 +129,32 @@ object Notifier {
         runCatching { NotificationManagerCompat.from(ctx).notify(callId.hashCode(), notification) }
     }
 
+    fun notifyActivePrivateCall(callId: String, peerName: String) {
+        val ctx = appContext ?: return
+        if (!NotificationManagerCompat.from(ctx).areNotificationsEnabled()) return
+        fun intent(action: String): PendingIntent {
+            val launch = ctx.packageManager.getLaunchIntentForPackage(ctx.packageName)
+                ?.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                ?.putExtra("private_call_action", action)
+                ?.putExtra("private_call_id", callId)
+            return PendingIntent.getActivity(ctx, (callId + action).hashCode(), launch,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+        }
+        val notification = NotificationCompat.Builder(ctx, CH_PRIVATE_CALL)
+            .setSmallIcon(R.drawable.ic_stat_alert).setColor(RED)
+            .setContentTitle("Radio privada activa")
+            .setContentText("Con $peerName · toca para volver a la transmisión")
+            .setCategory(NotificationCompat.CATEGORY_CALL)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            .setOngoing(true).setAutoCancel(false)
+            .setContentIntent(intent("open"))
+            .addAction(0, "Volver", intent("open"))
+            .addAction(0, "Colgar", intent("hangup"))
+            .build()
+        runCatching { NotificationManagerCompat.from(ctx).notify(callId.hashCode(), notification) }
+    }
+
     fun cancelPrivateCall(callId: String) {
         appContext?.let { runCatching { NotificationManagerCompat.from(it).cancel(callId.hashCode()) } }
     }

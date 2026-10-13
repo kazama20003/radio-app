@@ -64,6 +64,7 @@ object RadioManager {
     var lastVoiceNote by mutableStateOf<RadioTransmission?>(null); private set // última nota de voz del canal
     var netOnline by mutableStateOf(true); private set       // hay internet (ConnectivityManager)
     var privateCall by mutableStateOf<PrivateRadioCallState?>(null); private set
+    var openPrivateRadioRequest by mutableStateOf<String?>(null); private set
 
     private val ui = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val worker = Executors.newSingleThreadExecutor()
@@ -195,6 +196,7 @@ object RadioManager {
                 if (current.callId != o.optString("callId")) return@launch
                 Notifier.cancelPrivateCall(current.callId)
                 privateCall = current.copy(phase = "ACTIVE", peerName = o.optString("peerName", current.peerName))
+                Notifier.notifyActivePrivateCall(current.callId, privateCall?.peerName ?: current.peerName)
             }
         })
         socket.on("private-radio:ended", Emitter.Listener { args ->
@@ -648,6 +650,16 @@ object RadioManager {
 
     fun clearPrivateCall(callId: String) {
         if (privateCall?.callId == callId) privateCall = null
+    }
+
+    fun requestOpenPrivateRadio(callId: String) {
+        if (privateCall?.let { it.callId == callId && it.phase == "ACTIVE" } == true) {
+            openPrivateRadioRequest = callId
+        }
+    }
+
+    fun consumeOpenPrivateRadioRequest(callId: String) {
+        if (openPrivateRadioRequest == callId) openPrivateRadioRequest = null
     }
 
     /** Entra a una sala PTT privada asociada a una conversación DIRECT. */

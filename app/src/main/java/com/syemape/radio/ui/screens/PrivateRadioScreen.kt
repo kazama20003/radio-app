@@ -68,6 +68,7 @@ fun PrivateRadioScreen(
     peerName: String,
     topPadding: Dp,
     onBack: () -> Unit,
+    onHangUp: () -> Unit,
 ) {
     val context = LocalContext.current
     var latestVoice by remember(conversationId) { mutableStateOf<Message?>(null) }
@@ -123,13 +124,9 @@ fun PrivateRadioScreen(
                 Text("RADIO PRIVADA", color = PrivateText, fontFamily = Outfit, fontWeight = FontWeight.Bold, fontSize = 18.sp, letterSpacing = 0.5.sp)
                 Text("Con $peerName · canal seguro", color = PrivateMuted, fontFamily = Outfit, fontSize = 12.sp, maxLines = 1)
             }
-            Row(
-                Modifier.clip(CircleShape).background(if (RadioManager.connected) Color(0xFF123323) else Color(0xFF3A1C1D))
-                    .padding(horizontal = 10.dp, vertical = 7.dp),
-                horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Box(Modifier.size(7.dp).clip(CircleShape).background(if (RadioManager.connected) Color(0xFF28D17C) else PrivateRed))
-                Text(if (RadioManager.connected) "EN LÍNEA" else "CONECTANDO", color = PrivateText, fontFamily = Outfit, fontWeight = FontWeight.Bold, fontSize = 9.sp)
+            Box(Modifier.clip(CircleShape).background(Color(0xFF48191B)).clickable(onClick = onHangUp)
+                .padding(horizontal = 12.dp, vertical = 9.dp)) {
+                Text("COLGAR", color = Color(0xFFFF7777), fontFamily = Outfit, fontWeight = FontWeight.Bold, fontSize = 10.sp)
             }
         }
 

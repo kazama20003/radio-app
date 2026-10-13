@@ -35,6 +35,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
@@ -55,7 +56,14 @@ import kotlinx.coroutines.launch
 import java.io.File
 
 @Composable
-fun ChatDetailScreen(conversationId: String, title: String, topPadding: Dp, bottomPadding: Dp, onBack: () -> Unit) {
+fun ChatDetailScreen(
+    conversationId: String,
+    title: String,
+    topPadding: Dp,
+    bottomPadding: Dp,
+    onOpenPrivateRadio: (String, String) -> Unit = { _, _ -> },
+    onBack: () -> Unit,
+) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val meId = SessionManager.user?.id
     val scope = rememberCoroutineScope()
@@ -64,6 +72,7 @@ fun ChatDetailScreen(conversationId: String, title: String, topPadding: Dp, bott
     var draft by remember { mutableStateOf("") }
     var sending by remember { mutableStateOf(false) }
     var playingVoiceId by remember { mutableStateOf<String?>(null) }
+    var privatePeer by remember(conversationId) { mutableStateOf<com.syemape.radio.data.MiniUser?>(null) }
     val listState = rememberLazyListState()
 
     LaunchedEffect(conversationId) {
@@ -71,6 +80,9 @@ fun ChatDetailScreen(conversationId: String, title: String, topPadding: Dp, bott
         runCatching { Backend.api.conversation(conversationId) }
             .onSuccess {
                 messages.clear(); messages.addAll(it.messages)
+                privatePeer = if (it.conversation.type == "DIRECT") {
+                    it.conversation.members.mapNotNull { member -> member.user }.firstOrNull { user -> user.id.isNotBlank() && user.id != meId }
+                } else null
                 runCatching { Backend.api.markRead(conversationId) }
                 com.syemape.radio.data.AppBadges.refresh()
             }
@@ -111,7 +123,34 @@ fun ChatDetailScreen(conversationId: String, title: String, topPadding: Dp, bott
             Box(Modifier.size(42.dp).clip(CircleShape).pressScale { onBack() }, contentAlignment = Alignment.Center) {
                 Icon(MapeIcons.ArrowLeft, null, tint = MapeColors.Text, modifier = Modifier.size(24.dp))
             }
-            Text(title, color = MapeColors.Text, fontFamily = Outfit, fontWeight = FontWeight.SemiBold, fontSize = 18.sp)
+            Text(title, modifier = Modifier.weight(1f), color = MapeColors.Text, fontFamily = Outfit, fontWeight = FontWeight.SemiBold, fontSize = 18.sp, maxLines = 1)
+            privatePeer?.let { peer ->
+                val radioCall = com.syemape.radio.data.RadioManager.privateCall?.takeIf { it.conversationId == conversationId }
+                val actionLabel = when (radioCall?.phase) {
+                    "ACTIVE" -> "Volver a radio"
+                    "OUTGOING" -> "Llamando…"
+                    "INCOMING" -> "Contestar radio"
+                    else -> "Radio privada"
+                }
+                Row(
+                    Modifier.clip(CircleShape).background(if (radioCall?.phase == "ACTIVE") Color(0xFF168447) else MapeColors.Red)
+                        .clickable {
+                            val peerName = peer.nickname?.takeIf { it.isNotBlank() } ?: peer.name ?: title
+                            when (radioCall?.phase) {
+                                "ACTIVE" -> onOpenPrivateRadio(conversationId, peerName)
+                                "INCOMING" -> com.syemape.radio.data.RadioManager.answerPrivateCall(true, radioCall.callId)
+                                "OUTGOING" -> Unit
+                                else -> com.syemape.radio.data.RadioManager.startPrivateCall(conversationId, peer.id, peerName)
+                            }
+                        }
+                        .padding(horizontal = 11.dp, vertical = 9.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(5.dp),
+                ) {
+                    Text("☎", color = Color.White, fontSize = 13.sp)
+                    Text(actionLabel, color = Color.White, fontFamily = Outfit, fontWeight = FontWeight.Bold, fontSize = 10.sp, maxLines = 1)
+                }
+            }
         }
 
         // Mensajes

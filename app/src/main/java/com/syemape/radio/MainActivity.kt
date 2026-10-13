@@ -98,9 +98,21 @@ class MainActivity : ComponentActivity() {
         lifecycleScope.launch {
             repeat(40) {
                 val call = com.syemape.radio.data.RadioManager.privateCall
-                if (call?.callId == callId && call.phase == "INCOMING") {
-                    com.syemape.radio.data.RadioManager.answerPrivateCall(action == "answer", callId)
-                    return@launch
+                if (call?.callId == callId) {
+                    when (action) {
+                        "answer", "decline" -> if (call.phase == "INCOMING") {
+                            com.syemape.radio.data.RadioManager.answerPrivateCall(action == "answer", callId)
+                            return@launch
+                        }
+                        "open" -> if (call.phase == "ACTIVE") {
+                            com.syemape.radio.data.RadioManager.requestOpenPrivateRadio(callId)
+                            return@launch
+                        }
+                        "hangup" -> if (call.phase == "ACTIVE") {
+                            com.syemape.radio.data.RadioManager.endPrivateCall()
+                            return@launch
+                        }
+                    }
                 }
                 delay(500)
             }
@@ -139,6 +151,13 @@ private fun AppRoot(onDarkModeChanged: (Boolean) -> Unit) {
         }
     }
 
+    LaunchedEffect(com.syemape.radio.data.RadioManager.openPrivateRadioRequest, privateCall?.callId) {
+        val requested = com.syemape.radio.data.RadioManager.openPrivateRadioRequest ?: return@LaunchedEffect
+        val active = privateCall?.takeIf { it.callId == requested && it.phase == "ACTIVE" } ?: return@LaunchedEffect
+        openPrivateRadio = active.conversationId to active.peerName
+        com.syemape.radio.data.RadioManager.consumeOpenPrivateRadioRequest(requested)
+    }
+
     when (SessionManager.status) {
         AuthStatus.Loading -> Box(
             Modifier.fillMaxSize().background(MapeColors.Bg),
@@ -168,7 +187,7 @@ private fun AppRoot(onDarkModeChanged: (Boolean) -> Unit) {
           BackHandler(enabled = true) {
               when {
                   openSub != null -> openSub = null
-                  openPrivateRadio != null -> { com.syemape.radio.data.RadioManager.endPrivateCall(); openPrivateRadio = null }
+                  openPrivateRadio != null -> { openPrivateRadio = null }
                   openChannelChat != null -> openChannelChat = null
                   openChat != null -> openChat = null
                   tab != Tab.Mapa -> {
@@ -239,7 +258,8 @@ private fun AppRoot(onDarkModeChanged: (Boolean) -> Unit) {
                     conversationId = privateRadio.first,
                     peerName = privateRadio.second,
                     topPadding = topInset,
-                    onBack = { com.syemape.radio.data.RadioManager.endPrivateCall(); openPrivateRadio = null },
+                    onBack = { openPrivateRadio = null },
+                    onHangUp = { com.syemape.radio.data.RadioManager.endPrivateCall(); openPrivateRadio = null },
                 )
             } else if (channelChat != null) {
                 com.syemape.radio.ui.screens.ChannelChatScreen(
@@ -255,6 +275,7 @@ private fun AppRoot(onDarkModeChanged: (Boolean) -> Unit) {
                     title = chat.second,
                     topPadding = topInset,
                     bottomPadding = bottomInset,
+                    onOpenPrivateRadio = { id, name -> openPrivateRadio = id to name },
                     onBack = { openChat = null },
                 )
             } else {
