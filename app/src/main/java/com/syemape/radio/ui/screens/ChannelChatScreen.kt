@@ -502,7 +502,7 @@ fun ChannelChatScreen(channelId: String, title: String, topPadding: Dp, bottomPa
                                 ) {
                                     Box(Modifier.size(7.dp).clip(CircleShape).background(Color(0xFF22C55E)))
                                     Text(label, color = MapeColors.Text, fontFamily = Outfit, fontWeight = FontWeight.SemiBold, fontSize = 11.sp, maxLines = 1)
-                                    Icon(MapeIcons.UserPlus, "Iniciar radio privada con $label", tint = MapeColors.Red, modifier = Modifier.size(15.dp))
+                                    Icon(MapeIcons.Phone, "Iniciar radio privada con $label", tint = MapeColors.TextMuted, modifier = Modifier.size(15.dp))
                                 }
                             }
                         }

@@ -547,7 +547,7 @@ private fun ConnectedAlias(alias: String, modifier: Modifier = Modifier) {
     ) {
         OnlinePulseDot(Modifier.size(6.dp))
         Text(alias, color = RadioColors.Text, fontFamily = Outfit, fontWeight = FontWeight.SemiBold, fontSize = 10.sp, maxLines = 1)
-        Icon(MapeIcons.UserPlus, contentDescription = "Seleccionar $alias para radio privada", tint = Color(0xFFD71920), modifier = Modifier.size(14.dp))
+        Icon(MapeIcons.Phone, contentDescription = "Seleccionar $alias para radio privada", tint = RadioColors.TextMuted, modifier = Modifier.size(14.dp))
     }
 }
 

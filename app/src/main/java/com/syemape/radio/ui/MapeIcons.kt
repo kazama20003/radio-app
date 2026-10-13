@@ -95,6 +95,10 @@ object MapeIcons {
         Part(circlePath(16f, 14.5f, 2.5f)),
         Part("M7 13h4M7 16.5h4"),
     )
+    val Phone = buildIcon(
+        1.8f,
+        Part("M6.62 10.79a15.05 15.05 0 0 0 6.59 6.59l2.2-2.2a1 1 0 0 1 1.01-.24c1.12.37 2.33.56 3.58.56.55 0 1 .45 1 1V20c0 .55-.45 1-1 1C10.61 21 3 13.39 3 4c0-.55.45-1 1-1h3.5c.55 0 1 .45 1 1 0 1.25.2 2.46.56 3.59.11.34.03.73-.25 1.01z", fill = true),
+    )
     val Mic = buildIcon(2f, Part(rrectPath(9f, 3f, 6f, 11f, 3f)), Part("M5 11a7 7 0 0 0 14 0M12 18v3"))
     val Chat = buildIcon(1.8f, Part("M20 12a8 8 0 0 1-11.6 7.1L4 20l1-4.2A8 8 0 1 1 20 12z"))
     val Bell = buildIcon(1.8f, Part("M6 16v-5a6 6 0 0 1 12 0v5l2 2H4z"), Part("M10 21h4"))
