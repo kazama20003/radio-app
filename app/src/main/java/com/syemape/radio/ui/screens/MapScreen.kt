@@ -285,6 +285,19 @@ fun MapScreen(topPadding: Dp, bottomPadding: Dp = 0.dp) {
                     Text("$pending alertas", color = Color.White, fontFamily = Outfit, fontWeight = FontWeight.Bold, fontSize = 10.sp)
                 }
             }
+            // Tarjeta de navegación debajo del encabezado/logo y fuera del mapa.
+            if (selectedPerson != null && selectedPerson.id != meId) {
+                NavPanel(
+                    target = selectedPerson,
+                    routing = routing,
+                    route = if (routeFor == selectedPerson.id) routeInfo else null,
+                    modifier = Modifier.fillMaxWidth(),
+                    onNavigate = { navigateTo(selectedPerson) },
+                    onShowSteps = { showSteps = true },
+                    onCancel = { clearRoute() },
+                    onDismiss = { selectedId = null },
+                )
+            }
             FilterRow(
                 listOf(
                     "Todos · ${summary?.total ?: 0}",
@@ -302,13 +315,6 @@ fun MapScreen(topPadding: Dp, bottomPadding: Dp = 0.dp) {
         MapPreview(
             people, units, selectedId, meId, routePoints,
             onMarkerClick = { selectedId = it },
-            navigationTarget = selectedPerson?.takeIf { it.id != meId },
-            routing = routing,
-            route = if (routeFor == selectedPerson?.id) routeInfo else null,
-            onNavigate = { selectedPerson?.let(::navigateTo) },
-            onShowSteps = { showSteps = true },
-            onCancelRoute = { clearRoute() },
-            onDismissNavigation = { selectedId = null },
             boxModifier = Modifier.fillMaxWidth().weight(0.72f).padding(horizontal = 24.dp),
         )
 
@@ -526,13 +532,6 @@ private fun MapPreview(
     meId: String?,
     routePoints: List<LatLng>,
     onMarkerClick: (String) -> Unit,
-    navigationTarget: LivePerson?,
-    routing: Boolean,
-    route: DirectionsResult?,
-    onNavigate: () -> Unit,
-    onShowSteps: () -> Unit,
-    onCancelRoute: () -> Unit,
-    onDismissNavigation: () -> Unit,
     boxModifier: Modifier,
 ) {
     val cameraScope = rememberCoroutineScope()
@@ -628,7 +627,6 @@ private fun MapPreview(
             ),
             uiSettings = com.google.maps.android.compose.MapUiSettings(zoomControlsEnabled = false, mapToolbarEnabled = false),
             onMapLoaded = { mapLoaded = true },
-            onMapClick = { if (navigationTarget != null) onDismissNavigation() },
         ) {
             // Agrupa cuando están cercanos al alejar el zoom; al acercar, separa
             // suavemente sus avatares sin líneas que ensucien el mapa.
@@ -762,18 +760,6 @@ private fun MapPreview(
                     ),
                 )
             }
-        }
-        if (navigationTarget != null) {
-            NavPanel(
-                target = navigationTarget,
-                routing = routing,
-                route = route,
-                modifier = Modifier.align(Alignment.TopCenter).padding(top = 10.dp, start = 10.dp, end = 58.dp),
-                onNavigate = onNavigate,
-                onShowSteps = onShowSteps,
-                onCancel = onCancelRoute,
-                onDismiss = onDismissNavigation,
-            )
         }
         Box(
             Modifier.align(Alignment.TopEnd).padding(12.dp).size(44.dp).clip(CircleShape).background(MapeColors.Card)
