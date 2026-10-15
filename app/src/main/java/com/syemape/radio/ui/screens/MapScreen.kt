@@ -354,6 +354,15 @@ fun MapScreen(topPadding: Dp, bottomPadding: Dp = 0.dp) {
                                     Text(person.name, color = MapeColors.TextMuted, fontFamily = Outfit, fontSize = 11.sp,
                                         maxLines = 1, overflow = TextOverflow.Ellipsis)
                                 }
+                                val lastPositionAt = Fmt.dateTime(person.lastPositionAt)
+                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+                                    Icon(MapeIcons.Pin, contentDescription = null, tint = MapeColors.TextFaint, modifier = Modifier.size(10.dp))
+                                    Text(
+                                        if (lastPositionAt.isBlank()) "Sin ubicación reportada" else "Últ. ubicación · $lastPositionAt",
+                                        color = MapeColors.TextFaint, fontFamily = Outfit, fontSize = 9.sp, maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                }
                             }
                             Text(if (hasPosition) "VER" else "SIN GPS", color = if (hasPosition) MapeColors.Red else MapeColors.TextFaint,
                                 fontFamily = Outfit, fontWeight = FontWeight.Bold, fontSize = 9.sp)

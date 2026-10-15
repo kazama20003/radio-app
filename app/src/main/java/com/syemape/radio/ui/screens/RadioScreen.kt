@@ -70,8 +70,6 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.syemape.radio.data.RadioManager
-import com.syemape.radio.data.TrackingManager
-import com.syemape.radio.data.Fmt
 import com.syemape.radio.data.Backend
 import com.syemape.radio.data.CreateRadioChannelRequest
 import com.syemape.radio.data.CreateConversationRequest
@@ -530,7 +528,7 @@ private fun RadioMemberCard(onUserClick: (com.syemape.radio.data.MiniUser) -> Un
                 Text("Esperando conectados…", color = RadioColors.TextMuted, fontFamily = Outfit, fontWeight = FontWeight.SemiBold, fontSize = 10.sp, maxLines = 1)
             } else {
                 LazyRow(
-                    modifier = Modifier.fillMaxWidth().height(50.dp),
+                    modifier = Modifier.fillMaxWidth().height(28.dp),
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
@@ -538,11 +536,7 @@ private fun RadioMemberCard(onUserClick: (com.syemape.radio.data.MiniUser) -> Un
                         val alias = user.nickname?.trim()?.takeIf { it.isNotEmpty() }
                             ?: user.name?.trim()?.takeIf { it.isNotEmpty() }
                             ?: "Operador"
-                        ConnectedAlias(
-                            alias = alias,
-                            lastPositionAt = TrackingManager.people[user.id]?.lastPositionAt,
-                            modifier = Modifier.clickable { onUserClick(user) },
-                        )
+                        ConnectedAlias(alias, Modifier.clickable { onUserClick(user) })
                     }
                 }
             }
@@ -551,25 +545,16 @@ private fun RadioMemberCard(onUserClick: (com.syemape.radio.data.MiniUser) -> Un
 }
 
 @Composable
-private fun ConnectedAlias(alias: String, lastPositionAt: String?, modifier: Modifier = Modifier) {
-    Column(
-        modifier.clip(RoundedCornerShape(13.dp)).background(RadioColors.Ink.copy(alpha = 0.12f))
-            .padding(horizontal = 8.dp, vertical = 5.dp),
-        verticalArrangement = Arrangement.spacedBy(3.dp),
+private fun ConnectedAlias(alias: String, modifier: Modifier = Modifier) {
+    Row(
+        modifier.clip(CircleShape).background(RadioColors.Ink.copy(alpha = 0.12f))
+            .padding(horizontal = 8.dp, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(5.dp),
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-            OnlinePulseDot(Modifier.size(6.dp))
-            Text(alias, color = RadioColors.Text, fontFamily = Outfit, fontWeight = FontWeight.SemiBold, fontSize = 10.sp, maxLines = 1)
-            Icon(MapeIcons.Phone, contentDescription = "Seleccionar $alias para radio privada", tint = RadioColors.TextMuted, modifier = Modifier.size(14.dp))
-        }
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-            Icon(MapeIcons.Pin, contentDescription = null, tint = RadioColors.TextMuted, modifier = Modifier.size(11.dp))
-            val dateTime = Fmt.dateTime(lastPositionAt)
-            Text(
-                if (dateTime.isBlank()) "Ubicación sin datos" else "Últ. ubicación · $dateTime",
-                color = RadioColors.TextMuted, fontFamily = Outfit, fontSize = 8.sp, maxLines = 1,
-            )
-        }
+        OnlinePulseDot(Modifier.size(6.dp))
+        Text(alias, color = RadioColors.Text, fontFamily = Outfit, fontWeight = FontWeight.SemiBold, fontSize = 10.sp, maxLines = 1)
+        Icon(MapeIcons.Phone, contentDescription = "Seleccionar $alias para radio privada", tint = RadioColors.TextMuted, modifier = Modifier.size(14.dp))
     }
 }
 
