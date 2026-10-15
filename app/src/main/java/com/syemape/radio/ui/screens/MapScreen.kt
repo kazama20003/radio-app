@@ -225,6 +225,13 @@ fun MapScreen(topPadding: Dp, bottomPadding: Dp = 0.dp) {
     }
 
     val selectedPerson = people.firstOrNull { it.id == selectedId }
+    LaunchedEffect(selectedId) {
+        val pickedId = selectedId ?: return@LaunchedEffect
+        if (pickedId != meId) {
+            delay(6_500)
+            if (selectedId == pickedId) selectedId = null
+        }
+    }
 
     Column(
         modifier = Modifier.fillMaxSize().background(MapeColors.Bg)
@@ -295,7 +302,14 @@ fun MapScreen(topPadding: Dp, bottomPadding: Dp = 0.dp) {
         MapPreview(
             people, units, selectedId, meId, routePoints,
             onMarkerClick = { selectedId = it },
-            Modifier.fillMaxWidth().weight(0.72f).padding(horizontal = 24.dp),
+            navigationTarget = selectedPerson?.takeIf { it.id != meId },
+            routing = routing,
+            route = if (routeFor == selectedPerson?.id) routeInfo else null,
+            onNavigate = { selectedPerson?.let(::navigateTo) },
+            onShowSteps = { showSteps = true },
+            onCancelRoute = { clearRoute() },
+            onDismissNavigation = { selectedId = null },
+            boxModifier = Modifier.fillMaxWidth().weight(0.72f).padding(horizontal = 24.dp),
         )
 
         // Lista siempre visible para ubicar rápidamente a cualquier persona, sin buscador.
@@ -372,19 +386,6 @@ fun MapScreen(topPadding: Dp, bottomPadding: Dp = 0.dp) {
             }
         }
 
-        // La ficha flota sobre la pantalla en un diálogo; no resta espacio al mapa.
-        if (selectedPerson != null && selectedPerson.id != meId) {
-            NavPanel(
-                target = selectedPerson,
-                routing = routing,
-                route = if (routeFor == selectedPerson.id) routeInfo else null,
-                onNavigate = { navigateTo(selectedPerson) },
-                onShowSteps = { showSteps = true },
-                onCancel = { clearRoute() },
-                onDismiss = { selectedId = null },
-            )
-        }
-
     }
 
     // ---- Indicaciones paso a paso ----
@@ -400,56 +401,55 @@ private fun NavPanel(
     target: LivePerson,
     routing: Boolean,
     route: DirectionsResult?,
+    modifier: Modifier,
     onNavigate: () -> Unit,
     onShowSteps: () -> Unit,
     onCancel: () -> Unit,
     onDismiss: () -> Unit,
 ) {
     val name = target.nickname?.takeIf { it.isNotBlank() } ?: target.name ?: "Operador"
-    androidx.compose.ui.window.Dialog(onDismissRequest = onDismiss) {
-        Column(
-            Modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(MapeColors.Ink)
-                .border(1.dp, MapeColors.Border, RoundedCornerShape(24.dp)).padding(18.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                Box(Modifier.size(50.dp).clip(CircleShape).background(avatarColor(target.id)), contentAlignment = Alignment.Center) {
-                    Avatar(initialsOf(target.name ?: name), avatarColor(target.id), size = 50.dp)
-                    AsyncImage(
-                        model = target.photoUrl, contentDescription = "Foto de $name",
-                        modifier = Modifier.fillMaxSize().clip(CircleShape), contentScale = ContentScale.Crop,
-                    )
-                }
-                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                    Text(name, color = MapeColors.White, fontFamily = Outfit, fontWeight = FontWeight.Bold, fontSize = 17.sp, maxLines = 1,
-                        overflow = TextOverflow.Ellipsis)
-                    Text(
-                        when {
-                            routing -> "Calculando ruta…"
-                            route != null -> listOfNotNull(route.distanceText, route.durationText).joinToString(" · ").ifBlank { "Ruta lista" }
-                            else -> "Seleccionado en el mapa"
-                        },
-                        color = MapeColors.TextOnDark, fontFamily = Outfit, fontSize = 12.sp, maxLines = 1,
-                    )
-                }
-                Box(Modifier.size(38.dp).clip(CircleShape).background(Color.White.copy(alpha = 0.10f)).clickable { onDismiss() },
-                    contentAlignment = Alignment.Center) {
-                    Icon(MapeIcons.Close, "Cerrar", tint = MapeColors.White, modifier = Modifier.size(18.dp))
-                }
+    Column(
+        modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(MapeColors.Ink.copy(alpha = 0.97f))
+            .border(1.dp, MapeColors.Border, RoundedCornerShape(18.dp)).padding(horizontal = 11.dp, vertical = 9.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(9.dp)) {
+            Box(Modifier.size(36.dp).clip(CircleShape).background(avatarColor(target.id)), contentAlignment = Alignment.Center) {
+                Avatar(initialsOf(target.name ?: name), avatarColor(target.id), size = 36.dp)
+                AsyncImage(
+                    model = target.photoUrl, contentDescription = "Foto de $name",
+                    modifier = Modifier.fillMaxSize().clip(CircleShape), contentScale = ContentScale.Crop,
+                )
             }
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                val ctx = androidx.compose.ui.platform.LocalContext.current
-                if (target.lastLat != null && target.lastLng != null) {
-                    MapActionButton("Google Maps", MapeIcons.Pin, false, {
-                        openNativeNav(ctx, target.lastLat, target.lastLng)
-                    })
-                }
-                if (route != null) {
-                    MapActionButton("Pasos", MapeIcons.Sliders, false, onShowSteps)
-                    MapActionButton("Quitar ruta", MapeIcons.Close, true, onCancel)
-                } else {
-                    MapActionButton(if (routing) "Calculando…" else "Trazar ruta", MapeIcons.Navigation, true, onNavigate, enabled = !routing)
-                }
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(name, color = MapeColors.White, fontFamily = Outfit, fontWeight = FontWeight.Bold, fontSize = 14.sp, maxLines = 1,
+                    overflow = TextOverflow.Ellipsis)
+                Text(
+                    when {
+                        routing -> "Calculando ruta…"
+                        route != null -> listOfNotNull(route.distanceText, route.durationText).joinToString(" · ").ifBlank { "Ruta lista" }
+                        else -> "Seleccionado en el mapa"
+                    },
+                    color = MapeColors.TextOnDark, fontFamily = Outfit, fontSize = 10.sp, maxLines = 1,
+                )
+            }
+            Box(Modifier.size(32.dp).clip(CircleShape).background(Color.White.copy(alpha = 0.10f)).clickable { onDismiss() },
+                contentAlignment = Alignment.Center) {
+                Icon(MapeIcons.Close, "Cerrar", tint = MapeColors.White, modifier = Modifier.size(16.dp))
+            }
+        }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(7.dp), verticalAlignment = Alignment.CenterVertically) {
+            val ctx = androidx.compose.ui.platform.LocalContext.current
+            if (target.lastLat != null && target.lastLng != null) {
+                MapActionButton("Google Maps", MapeIcons.Pin, false, {
+                    openNativeNav(ctx, target.lastLat, target.lastLng)
+                })
+            }
+            if (route != null) {
+                MapActionButton("Pasos", MapeIcons.Sliders, false, onShowSteps)
+                MapActionButton("Quitar ruta", MapeIcons.Close, true, onCancel)
+            } else {
+                MapActionButton(if (routing) "Calculando…" else "Trazar ruta", MapeIcons.Navigation, true, onNavigate, enabled = !routing)
             }
         }
     }
@@ -526,6 +526,13 @@ private fun MapPreview(
     meId: String?,
     routePoints: List<LatLng>,
     onMarkerClick: (String) -> Unit,
+    navigationTarget: LivePerson?,
+    routing: Boolean,
+    route: DirectionsResult?,
+    onNavigate: () -> Unit,
+    onShowSteps: () -> Unit,
+    onCancelRoute: () -> Unit,
+    onDismissNavigation: () -> Unit,
     boxModifier: Modifier,
 ) {
     val cameraScope = rememberCoroutineScope()
@@ -621,6 +628,7 @@ private fun MapPreview(
             ),
             uiSettings = com.google.maps.android.compose.MapUiSettings(zoomControlsEnabled = false, mapToolbarEnabled = false),
             onMapLoaded = { mapLoaded = true },
+            onMapClick = { if (navigationTarget != null) onDismissNavigation() },
         ) {
             // Agrupa cuando están cercanos al alejar el zoom; al acercar, separa
             // suavemente sus avatares sin líneas que ensucien el mapa.
@@ -754,6 +762,18 @@ private fun MapPreview(
                     ),
                 )
             }
+        }
+        if (navigationTarget != null) {
+            NavPanel(
+                target = navigationTarget,
+                routing = routing,
+                route = route,
+                modifier = Modifier.align(Alignment.TopCenter).padding(top = 10.dp, start = 10.dp, end = 58.dp),
+                onNavigate = onNavigate,
+                onShowSteps = onShowSteps,
+                onCancel = onCancelRoute,
+                onDismiss = onDismissNavigation,
+            )
         }
         Box(
             Modifier.align(Alignment.TopEnd).padding(12.dp).size(44.dp).clip(CircleShape).background(MapeColors.Card)
