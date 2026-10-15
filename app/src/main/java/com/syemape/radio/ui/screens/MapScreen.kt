@@ -304,7 +304,8 @@ fun MapScreen(topPadding: Dp, bottomPadding: Dp = 0.dp) {
 
         // ---- Lista de personas (scroll propio) ----
         LazyColumn(
-            modifier = Modifier.height(190.dp),
+            // Keep the roster compact so the live map gets most of the screen.
+            modifier = Modifier.height(112.dp),
             contentPadding = PaddingValues(start = 24.dp, end = 24.dp, bottom = 110.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
@@ -455,8 +456,11 @@ private fun MapPreview(
 ) {
     val cameraScope = rememberCoroutineScope()
     val context = LocalContext.current
+    val density = androidx.compose.ui.platform.LocalDensity.current.density
     var satellite by remember { mutableStateOf(true) }
     var traffic by remember { mutableStateOf(true) }
+    var markerGroups by remember { mutableStateOf<List<List<LivePerson>>>(emptyList()) }
+    var clusterMembers by remember { mutableStateOf<List<LivePerson>?>(null) }
     val located = people.filter { isValidCoordinate(it.lastLat, it.lastLng) }
     val photoSources = located.map { it.id to it.photoUrl }
     var markerPhotos by remember { mutableStateOf<Map<String, ImageBitmap>>(emptyMap()) }
@@ -536,6 +540,35 @@ private fun MapPreview(
             ),
             uiSettings = com.google.maps.android.compose.MapUiSettings(zoomControlsEnabled = false, mapToolbarEnabled = false),
         ) {
+            // Group markers using their real on-screen distance. This responds to
+            // zoom and avoids drawing several faces on top of one another.
+            com.google.maps.android.compose.MapEffect(located, camera.position.zoom) { map ->
+                val projection = map.projection
+                val remaining = located.toMutableList()
+                val groups = mutableListOf<List<LivePerson>>()
+                val minSeparationPx = 52f * density
+                while (remaining.isNotEmpty()) {
+                    val seed = remaining.removeAt(0)
+                    val seedPoint = projection.toScreenLocation(
+                        com.google.android.gms.maps.model.LatLng(seed.lastLat!!, seed.lastLng!!),
+                    )
+                    val group = mutableListOf(seed)
+                    var index = 0
+                    while (index < remaining.size) {
+                        val person = remaining[index]
+                        val point = projection.toScreenLocation(
+                            com.google.android.gms.maps.model.LatLng(person.lastLat!!, person.lastLng!!),
+                        )
+                        val dx = (point.x - seedPoint.x).toFloat()
+                        val dy = (point.y - seedPoint.y).toFloat()
+                        if (dx * dx + dy * dy <= minSeparationPx * minSeparationPx) {
+                            group += remaining.removeAt(index)
+                        } else index++
+                    }
+                    groups += group
+                }
+                markerGroups = groups
+            }
             if (routePoints.size >= 2) {
                 com.google.maps.android.compose.Polyline(
                     points = routePoints,
@@ -548,19 +581,40 @@ private fun MapPreview(
                     width = 13f,
                 )
             }
-            located.forEach { p ->
-                val pos = com.google.android.gms.maps.model.LatLng(p.lastLat!!, p.lastLng!!)
-                val st = com.google.maps.android.compose.rememberMarkerState(key = p.id, position = pos)
-                st.position = pos
-            com.google.maps.android.compose.MarkerComposable(
-                    p.id, p.id == selectedId, p.id == meId, p.nickname ?: "", p.avatarKey ?: "",
-                    p.photoUrl ?: "", markerPhotos[p.id]?.hashCode() ?: 0,
-                    state = st,
-                    title = p.nickname?.takeIf { it.isNotBlank() } ?: p.name ?: "Operador",
-                    anchor = androidx.compose.ui.geometry.Offset(0.5f, 1f),
-                    onClick = { onMarkerClick(p.id); true },
-                ) {
-                    OperatorMarker(p, selected = p.id == selectedId, isMe = p.id == meId, photo = markerPhotos[p.id])
+            markerGroups.forEach { group ->
+                if (group.size == 1) {
+                    val p = group.first()
+                    val pos = com.google.android.gms.maps.model.LatLng(p.lastLat!!, p.lastLng!!)
+                    val st = com.google.maps.android.compose.rememberMarkerState(key = p.id, position = pos)
+                    st.position = pos
+                    com.google.maps.android.compose.MarkerComposable(
+                        p.id, p.id == selectedId, p.id == meId, p.nickname ?: "", p.avatarKey ?: "",
+                        p.photoUrl ?: "", markerPhotos[p.id]?.hashCode() ?: 0,
+                        state = st,
+                        title = p.nickname?.takeIf { it.isNotBlank() } ?: p.name ?: "Operador",
+                        anchor = androidx.compose.ui.geometry.Offset(0.5f, 1f),
+                        onClick = { onMarkerClick(p.id); true },
+                    ) {
+                        OperatorMarker(p, selected = p.id == selectedId, isMe = p.id == meId, photo = markerPhotos[p.id])
+                    }
+                } else {
+                    val center = com.google.android.gms.maps.model.LatLng(
+                        group.map { it.lastLat!! }.average(), group.map { it.lastLng!! }.average(),
+                    )
+                    val state = com.google.maps.android.compose.rememberMarkerState(
+                        key = "cluster-${group.map { it.id }.sorted().joinToString()}", position = center,
+                    )
+                    state.position = center
+                    com.google.maps.android.compose.MarkerComposable(
+                        "cluster-${group.map { it.id }.sorted().joinToString()}",
+                        group.any { it.id == selectedId }, false, group.size.toString(), "",
+                        group.mapNotNull { markerPhotos[it.id]?.hashCode() }.sum(),
+                        state = state,
+                        title = "${group.size} operadores juntos",
+                        onClick = { clusterMembers = group; true },
+                    ) {
+                        ClusterMarker(group, markerPhotos)
+                    }
                 }
             }
             units.filter { isValidCoordinate(it.lat, it.lng) }.forEach { u ->
@@ -612,6 +666,47 @@ private fun MapPreview(
             MapLayerChip("Satélite", satellite) { satellite = !satellite }
             MapLayerChip("Tráfico", traffic) { traffic = !traffic }
         }
+        clusterMembers?.let { members ->
+            androidx.compose.ui.window.Dialog(onDismissRequest = { clusterMembers = null }) {
+                Column(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(22.dp)).background(MapeColors.Card)
+                        .padding(18.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    Text("Operadores en esta ubicación", color = MapeColors.Text, fontFamily = Outfit,
+                        fontWeight = FontWeight.Bold, fontSize = 17.sp)
+                    Text("${members.size} personas están muy cerca. Selecciona una para ver su ubicación.",
+                        color = MapeColors.TextMuted, fontFamily = Outfit, fontSize = 13.sp)
+                    LazyColumn(
+                        modifier = Modifier.heightIn(max = 360.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        items(members, key = { it.id }) { person ->
+                            Row(
+                                Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(MapeColors.Bg)
+                                    .pressScale { onMarkerClick(person.id); clusterMembers = null }
+                                    .padding(10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            ) {
+                                Box(Modifier.size(42.dp), contentAlignment = Alignment.Center) {
+                                    Avatar(initialsOf(person.name ?: person.nickname ?: "?"), avatarColor(person.id), size = 42.dp)
+                                    markerPhotos[person.id]?.let { photo ->
+                                        Image(photo, contentDescription = null, modifier = Modifier.size(40.dp).clip(CircleShape), contentScale = ContentScale.Crop)
+                                    }
+                                }
+                                Column(Modifier.weight(1f)) {
+                                    Text(person.nickname?.takeIf { it.isNotBlank() } ?: person.name ?: "Operador",
+                                        color = MapeColors.Text, fontFamily = Outfit, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                                    Text("En línea", color = MapeColors.TextMuted, fontFamily = Outfit, fontSize = 12.sp)
+                                }
+                                Box(Modifier.size(9.dp).clip(CircleShape).background(Color(0xFF22C55E)))
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -653,8 +748,8 @@ private fun OperatorMarker(p: LivePerson, selected: Boolean, isMe: Boolean, phot
     val label = p.nickname?.takeIf { it.isNotBlank() }
         ?: p.name?.trim()?.split(" ")?.firstOrNull()?.replaceFirstChar { it.uppercase() }
         ?: "Operador"
-    val ringSize = if (selected) 40.dp else 34.dp
-    val avatarSize = if (selected) 32.dp else 27.dp
+    val ringSize = if (selected) 52.dp else 44.dp
+    val avatarSize = if (selected) 44.dp else 36.dp
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Box(
             Modifier.size(ringSize).clip(CircleShape).background(ring),
@@ -684,6 +779,29 @@ private fun OperatorMarker(p: LivePerson, selected: Boolean, isMe: Boolean, phot
                 modifier = Modifier.clip(RoundedCornerShape(7.dp)).background(MapeColors.Ink).padding(horizontal = 6.dp, vertical = 2.dp),
             )
         }
+    }
+}
+
+@Composable
+private fun ClusterMarker(people: List<LivePerson>, photos: Map<String, ImageBitmap>) {
+    Row(
+        Modifier.clip(CircleShape).background(MapeColors.Ink)
+            .border(2.dp, MapeColors.White, CircleShape)
+            .padding(horizontal = 7.dp, vertical = 5.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(5.dp),
+    ) {
+        Row(horizontalArrangement = Arrangement.spacedBy(1.dp)) {
+            people.take(3).forEach { person ->
+                Box(Modifier.size(28.dp).clip(CircleShape).background(avatarColor(person.id)).border(1.5.dp, MapeColors.White, CircleShape), contentAlignment = Alignment.Center) {
+                    photos[person.id]?.let { photo ->
+                        Image(photo, contentDescription = null, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                    } ?: Text(initialsOf(person.nickname ?: person.name ?: "?"), color = MapeColors.White, fontFamily = Outfit,
+                        fontWeight = FontWeight.Bold, fontSize = 9.sp)
+                }
+            }
+        }
+        Text("${people.size}", color = MapeColors.White, fontFamily = Outfit, fontWeight = FontWeight.Bold, fontSize = 13.sp)
     }
 }
 
