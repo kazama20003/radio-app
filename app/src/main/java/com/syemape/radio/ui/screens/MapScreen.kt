@@ -2,6 +2,7 @@ package com.syemape.radio.ui.screens
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -20,6 +21,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -41,6 +43,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -69,6 +72,7 @@ import com.syemape.radio.ui.theme.MapeColors
 import com.syemape.radio.ui.theme.Outfit
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import java.text.Normalizer
 
 /** Abre la navegación paso a paso en la app de mapas nativa (Google Maps). */
 private fun openNativeNav(context: android.content.Context, lat: Double, lng: Double) {
@@ -131,6 +135,11 @@ private data class OperatorMapPin(
     val displayPosition: LatLng,
     val spiderfied: Boolean,
 )
+
+private fun normalizeMapSearch(value: String): String =
+    Normalizer.normalize(value.trim(), Normalizer.Form.NFD)
+        .replace("\\p{Mn}+".toRegex(), "")
+        .lowercase()
 
 @Composable
 fun MapScreen(topPadding: Dp, bottomPadding: Dp = 0.dp) {
@@ -439,8 +448,10 @@ private fun MapPreview(
     val cameraScope = rememberCoroutineScope()
     val context = LocalContext.current
     val density = androidx.compose.ui.platform.LocalDensity.current.density
+    val keyboard = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
     var satellite by remember { mutableStateOf(true) }
     var traffic by remember { mutableStateOf(true) }
+    var searchQuery by remember { mutableStateOf("") }
     var mapLoaded by remember { mutableStateOf(false) }
     val located = people.filter { isValidCoordinate(it.lastLat, it.lastLng) }
     var operatorPins by remember { mutableStateOf<List<OperatorMapPin>>(emptyList()) }
@@ -451,7 +462,7 @@ private fun MapPreview(
             OperatorMapPin(person, point, point, spiderfied = false)
         }
     }
-    val photoSources = located.map { it.id to it.photoUrl }
+    val photoSources = people.map { it.id to it.photoUrl }
     var markerPhotos by remember { mutableStateOf<Map<String, ImageBitmap>>(emptyMap()) }
     LaunchedEffect(photoSources) {
         val loader = Coil.imageLoader(context)
@@ -638,13 +649,98 @@ private fun MapPreview(
                 )
             }
         }
-        Row(
-            Modifier.align(Alignment.TopStart).padding(12.dp).height(32.dp).clip(CircleShape).background(MapeColors.Ink).padding(horizontal = 12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        Column(
+            Modifier.align(Alignment.TopStart).fillMaxWidth().padding(12.dp).padding(end = 54.dp),
+            verticalArrangement = Arrangement.spacedBy(7.dp),
         ) {
-            LiveDot()
-            Text("En vivo · ${people.size} en línea", color = MapeColors.White, fontFamily = Outfit, fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
+            Row(
+                Modifier.fillMaxWidth().height(48.dp).clip(RoundedCornerShape(16.dp))
+                    .background(MapeColors.Card).border(1.dp, MapeColors.Border, RoundedCornerShape(16.dp))
+                    .padding(horizontal = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(9.dp),
+            ) {
+                Icon(MapeIcons.Search, contentDescription = "Buscar operador", tint = MapeColors.Red, modifier = Modifier.size(20.dp))
+                BasicTextField(
+                    value = searchQuery,
+                    onValueChange = { searchQuery = it },
+                    modifier = Modifier.weight(1f),
+                    singleLine = true,
+                    textStyle = TextStyle(color = MapeColors.Text, fontFamily = Outfit, fontSize = 14.sp),
+                    decorationBox = { innerTextField ->
+                        Box {
+                            if (searchQuery.isBlank()) {
+                                Text("Buscar por apelativo o nombre", color = MapeColors.TextFaint, fontFamily = Outfit, fontSize = 13.sp)
+                            }
+                            innerTextField()
+                        }
+                    },
+                )
+                if (searchQuery.isNotBlank()) {
+                    Icon(
+                        MapeIcons.Close, contentDescription = "Limpiar búsqueda", tint = MapeColors.TextMuted,
+                        modifier = Modifier.size(20.dp).clickable { searchQuery = ""; keyboard?.hide() },
+                    )
+                }
+            }
+            if (searchQuery.isBlank()) {
+                Row(
+                    Modifier.height(30.dp).clip(CircleShape).background(MapeColors.Ink).padding(horizontal = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(7.dp),
+                ) {
+                    LiveDot()
+                    Text("En vivo · ${people.size} en línea", color = MapeColors.White, fontFamily = Outfit, fontWeight = FontWeight.SemiBold, fontSize = 11.sp)
+                }
+            } else {
+                val query = normalizeMapSearch(searchQuery)
+                val matches = people.filter { person ->
+                    val searchable = normalizeMapSearch("${person.nickname.orEmpty()} ${person.name.orEmpty()}")
+                    query in searchable
+                }.take(7)
+                Column(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(MapeColors.Card)
+                        .border(1.dp, MapeColors.Border, RoundedCornerShape(16.dp)).padding(vertical = 4.dp),
+                ) {
+                    if (matches.isEmpty()) {
+                        Text("No se encontraron operadores", color = MapeColors.TextMuted, fontFamily = Outfit, fontSize = 13.sp,
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 14.dp))
+                    }
+                    matches.forEach { person ->
+                        val nickname = person.nickname?.takeIf { it.isNotBlank() }
+                            ?: person.name?.trim()?.split(" ")?.firstOrNull() ?: "Operador"
+                        val hasPosition = isValidCoordinate(person.lastLat, person.lastLng)
+                        Row(
+                            Modifier.fillMaxWidth().clickable {
+                                if (hasPosition) {
+                                    onMarkerClick(person.id)
+                                    searchQuery = ""
+                                    keyboard?.hide()
+                                } else {
+                                    android.widget.Toast.makeText(context, "$nickname todavía no comparte ubicación", android.widget.Toast.LENGTH_SHORT).show()
+                                }
+                            }.padding(horizontal = 12.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        ) {
+                            Box(Modifier.size(38.dp).clip(CircleShape).background(avatarColor(person.id)), contentAlignment = Alignment.Center) {
+                                Avatar(initialsOf(person.name ?: person.nickname ?: "?"), avatarColor(person.id), size = 38.dp)
+                                markerPhotos[person.id]?.let { photo ->
+                                    Image(photo, contentDescription = "Foto de $nickname", modifier = Modifier.fillMaxSize().clip(CircleShape), contentScale = ContentScale.Crop)
+                                }
+                            }
+                            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(1.dp)) {
+                                Text(nickname, color = MapeColors.Text, fontFamily = Outfit, fontWeight = FontWeight.SemiBold, fontSize = 13.sp, maxLines = 1)
+                                if (!person.name.isNullOrBlank() && person.name != nickname) {
+                                    Text(person.name, color = MapeColors.TextMuted, fontFamily = Outfit, fontSize = 11.sp, maxLines = 1)
+                                }
+                            }
+                            Text(if (hasPosition) "UBICAR" else "SIN GPS", color = if (hasPosition) MapeColors.Red else MapeColors.TextFaint,
+                                fontFamily = Outfit, fontWeight = FontWeight.Bold, fontSize = 9.sp)
+                        }
+                    }
+                }
+            }
         }
         Box(
             Modifier.align(Alignment.TopEnd).padding(12.dp).size(44.dp).clip(CircleShape).background(MapeColors.Card)
