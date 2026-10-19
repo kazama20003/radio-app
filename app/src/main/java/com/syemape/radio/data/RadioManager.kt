@@ -64,6 +64,8 @@ object RadioManager {
     var lastVoiceNote by mutableStateOf<RadioTransmission?>(null); private set // última nota de voz del canal
     var netOnline by mutableStateOf(true); private set       // hay internet (ConnectivityManager)
     var privateCall by mutableStateOf<PrivateRadioCallState?>(null); private set
+    var privateCallHistory by mutableStateOf<List<PrivateCallHistoryEntry>>(emptyList()); private set
+    var hasUnreadPrivateCalls by mutableStateOf(false); private set
     var openPrivateRadioRequest by mutableStateOf<String?>(null); private set
 
     private val ui = CoroutineScope(SupervisorJob() + Dispatchers.Main)
@@ -170,6 +172,8 @@ object RadioManager {
         started = true
         appRef = app
         sysAudio = app.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        loadPrivateCallHistory()
+        hasUnreadPrivateCalls = Prefs.hasUnreadPrivateCalls
         registerConnectivity(app) // estado de internet para el indicador de señal
         // Listeners + conexión del socket
         radioConnectListener?.let { socket.off("connect", it) }
@@ -188,6 +192,9 @@ object RadioManager {
             if (id.isBlank() || convo.isBlank() || peerId.isBlank()) return@Listener
             ui.launch {
                 privateCall = PrivateRadioCallState(id, convo, peerId, name, "INCOMING", false)
+                addIncomingCallToHistory(id, peerId, name)
+                hasUnreadPrivateCalls = true
+                Prefs.hasUnreadPrivateCalls = true
                 Notifier.notifyPrivateCall(id, name)
             }
         })
@@ -223,8 +230,12 @@ object RadioManager {
         socket.on("private-radio:ended", Emitter.Listener { args ->
             val o = args.firstOrNull() as? JSONObject ?: return@Listener
             ui.launch {
-                val current = privateCall ?: return@launch
-                if (current.callId != o.optString("callId")) return@launch
+                val callId = o.optString("callId")
+                val current = privateCall?.takeIf { it.callId == callId }
+                if (privateCallHistory.any { it.callId == callId && it.outcome == "RECIBIDA" }) {
+                    updatePrivateCallHistory(callId, "SIN RESPUESTA")
+                }
+                if (current == null) return@launch
                 Notifier.cancelPrivateCall(current.callId)
                 privateCall = current.copy(phase = o.optString("reason", "ENDED").uppercase(), reason = o.optString("reason"))
             }
@@ -675,7 +686,10 @@ object RadioManager {
             val result = args.firstOrNull() as? JSONObject
             ui.launch {
                 if (result?.optBoolean("ok") != true) privateCall = current.copy(phase = "ENDED", reason = result?.optString("error") ?: "La llamada ya no está disponible.")
-                else if (!accept) privateCall = current.copy(phase = "DECLINED")
+                else {
+                    updatePrivateCallHistory(current.callId, if (accept) "CONTESTADA" else "RECHAZADA")
+                    if (!accept) privateCall = current.copy(phase = "DECLINED")
+                }
             }
         })
     }
@@ -691,6 +705,60 @@ object RadioManager {
 
     fun clearPrivateCall(callId: String) {
         if (privateCall?.callId == callId) privateCall = null
+    }
+
+    private fun loadPrivateCallHistory() {
+        privateCallHistory = runCatching {
+            val array = JSONArray(Prefs.privateCallHistory)
+            (0 until array.length()).mapNotNull { index ->
+                val row = array.optJSONObject(index) ?: return@mapNotNull null
+                val id = row.optString("callId")
+                if (id.isBlank()) return@mapNotNull null
+                PrivateCallHistoryEntry(
+                    callId = id,
+                    peerId = row.optString("peerId"),
+                    peerName = row.optString("peerName", "Usuario"),
+                    timestamp = row.optLong("timestamp"),
+                    outcome = row.optString("outcome", "RECIBIDA"),
+                )
+            }
+        }.getOrDefault(emptyList())
+    }
+
+    private fun addIncomingCallToHistory(callId: String, peerId: String, peerName: String) {
+        if (privateCallHistory.any { it.callId == callId }) return
+        privateCallHistory = (listOf(PrivateCallHistoryEntry(
+            callId = callId,
+            peerId = peerId,
+            peerName = peerName.ifBlank { "Usuario" },
+            timestamp = System.currentTimeMillis(),
+        )) + privateCallHistory).take(100)
+        persistPrivateCallHistory()
+    }
+
+    private fun updatePrivateCallHistory(callId: String, outcome: String) {
+        privateCallHistory = privateCallHistory.map {
+            if (it.callId == callId) it.copy(outcome = outcome) else it
+        }
+        persistPrivateCallHistory()
+    }
+
+    private fun persistPrivateCallHistory() {
+        Prefs.privateCallHistory = JSONArray().apply {
+            privateCallHistory.forEach { entry ->
+                put(JSONObject()
+                    .put("callId", entry.callId)
+                    .put("peerId", entry.peerId)
+                    .put("peerName", entry.peerName)
+                    .put("timestamp", entry.timestamp)
+                    .put("outcome", entry.outcome))
+            }
+        }.toString()
+    }
+
+    fun markPrivateCallsRead() {
+        hasUnreadPrivateCalls = false
+        Prefs.hasUnreadPrivateCalls = false
     }
 
     fun requestOpenPrivateRadio(callId: String) {
@@ -1509,7 +1577,9 @@ object RadioManager {
                 else Math.round(callVolume * max).coerceIn(0, max)
             am.setStreamVolume(stream, idx, 0)
         }
-        val trackVolume = if (isBluetoothCommunicationRoute()) callVolume.toDouble() else 1.0
+        // La pista remota también necesita gain en la salida Teléfono/altavoz:
+        // algunos equipos ignoran STREAM_VOICE_CALL para esa ruta.
+        val trackVolume = callVolume.toDouble()
         worker.execute { consumers.values.forEach { applyRemoteTrackVolume(it, trackVolume) } }
     }
 
@@ -1519,8 +1589,7 @@ object RadioManager {
             .onFailure { android.util.Log.w(TAG, "No se pudo aplicar volumen a pista remota", it) }
     }
 
-    private fun currentRemoteTrackVolume(): Double =
-        if (isBluetoothCommunicationRoute()) callVolume.toDouble() else 1.0
+    private fun currentRemoteTrackVolume(): Double = callVolume.toDouble()
 
     private fun isBluetoothCommunicationRoute(): Boolean {
         val am = sysAudio ?: return false

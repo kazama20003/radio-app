@@ -61,6 +61,14 @@ object Prefs {
         get() = p?.getFloat("callVolume", 1f) ?: 1f
         set(v) { p?.edit()?.putFloat("callVolume", v)?.apply() }
 
+    var privateCallHistory: String
+        get() = p?.getString("privateCallHistory", "[]") ?: "[]"
+        set(v) { p?.edit()?.putString("privateCallHistory", v)?.apply() }
+
+    var hasUnreadPrivateCalls: Boolean
+        get() = p?.getBoolean("hasUnreadPrivateCalls", false) ?: false
+        set(v) { p?.edit()?.putBoolean("hasUnreadPrivateCalls", v)?.apply() }
+
     /** Ya se pidió una vez la exención de optimización de batería (no volver a molestar). */
     var batteryOptAsked: Boolean
         get() = p?.getBoolean("batteryOptAsked", false) ?: false

@@ -6,7 +6,7 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.media.AudioAttributes
-import android.net.Uri
+import android.media.RingtoneManager
 import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
@@ -27,7 +27,7 @@ object Notifier {
     private const val CH_ALERT = "mape_alerts"                       // normal, con sonido
     private const val CH_ALERT_QUIET = "mape_alerts_quiet"           // normal, sin sonido (radio activa)
     // Nuevo ID porque Android no deja modificar sonido/vibración de canales existentes.
-    private const val CH_PRIVATE_CALL = "mape_private_calls_v2"
+    private const val CH_PRIVATE_CALL = "mape_private_calls_v3"
     private const val CH_PRIVATE_ACTIVE = "mape_private_active_v2"
     private val RED = 0xFFE5322D.toInt()
 
@@ -47,7 +47,7 @@ object Notifier {
         if (nm.getNotificationChannel(CH_PRIVATE_CALL) == null) {
             nm.createNotificationChannel(NotificationChannel(CH_PRIVATE_CALL, "Llamadas de radio privada", NotificationManager.IMPORTANCE_HIGH).apply {
                 description = "Timbre y vibración para llamadas entrantes de radio privada"
-                val sound = Uri.parse("android.resource://${appContext?.packageName}/${R.raw.radio_private_ring}")
+                val sound = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE)
                 val soundAttributes = AudioAttributes.Builder()
                     .setUsage(AudioAttributes.USAGE_NOTIFICATION_RINGTONE)
                     .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
@@ -136,6 +136,7 @@ object Notifier {
             .setSmallIcon(R.drawable.ic_stat_alert).setColor(RED)
             .setContentTitle("Llamada de radio privada")
             .setContentText("$callerName quiere hablar contigo")
+            .setStyle(NotificationCompat.BigTextStyle().bigText("$callerName te está llamando por radio privada"))
             .setCategory(NotificationCompat.CATEGORY_CALL)
             .setPriority(NotificationCompat.PRIORITY_MAX)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)

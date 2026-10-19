@@ -34,6 +34,7 @@ enum class Tab(val label: String, val icon: ImageVector) {
     Mapa("Mapa", MapeIcons.Pin),
     Radio("Radio", MapeIcons.Radio),
     Chats("Chat", MapeIcons.Chat),
+    Llamadas("Llamadas", MapeIcons.Phone),
     Alertas("Alertas", MapeIcons.Bell),
     Perfil("Perfil", MapeIcons.User),
 }
@@ -43,7 +44,7 @@ fun BottomNav(active: Tab, modifier: Modifier = Modifier, onSelect: (Tab) -> Uni
     Row(
         modifier
             .fillMaxWidth()
-            .padding(horizontal = 28.dp)
+            .padding(horizontal = if (Tab.entries.size > 5) 12.dp else 28.dp)
             .height(64.dp)
             .clip(RoundedCornerShape(34.dp))
             .background(MapeColors.Ink)
@@ -53,9 +54,10 @@ fun BottomNav(active: Tab, modifier: Modifier = Modifier, onSelect: (Tab) -> Uni
         Tab.entries.forEach { tab ->
             val isActive = tab == active
             val badge = if (tab == Tab.Chats) com.syemape.radio.data.AppBadges.unreadChats else 0
-            val dot = tab == Tab.Alertas && com.syemape.radio.data.AppBadges.pendingAlerts > 0
+            val dot = (tab == Tab.Alertas && com.syemape.radio.data.AppBadges.pendingAlerts > 0) ||
+                (tab == Tab.Llamadas && RadioManager.hasUnreadPrivateCalls)
             Box(
-                modifier = (if (isActive) Modifier.weight(1f) else Modifier.width(48.dp))
+                modifier = (if (isActive) Modifier.weight(1f) else Modifier.width(if (Tab.entries.size > 5) 40.dp else 48.dp))
                     .fillMaxHeight()
                     .pressScale { onSelect(tab) },
                 contentAlignment = Alignment.Center,

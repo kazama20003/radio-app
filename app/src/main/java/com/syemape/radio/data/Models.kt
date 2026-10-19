@@ -85,6 +85,14 @@ data class PrivateRadioCallState(
     val reason: String? = null,
 )
 
+data class PrivateCallHistoryEntry(
+    val callId: String,
+    val peerId: String,
+    val peerName: String,
+    val timestamp: Long,
+    val outcome: String = "RECIBIDA",
+)
+
 data class MiniUnit(val id: String = "", val code: String? = null, val plate: String? = null)
 
 /** Unidad en vivo (tracking/live). */

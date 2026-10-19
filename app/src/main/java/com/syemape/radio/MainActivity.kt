@@ -38,6 +38,7 @@ import com.syemape.radio.ui.Tab
 import com.syemape.radio.ui.screens.AlertsScreen
 import com.syemape.radio.ui.screens.ChatDetailScreen
 import com.syemape.radio.ui.screens.ChatsScreen
+import com.syemape.radio.ui.screens.CallsScreen
 import com.syemape.radio.ui.screens.LoginScreen
 import com.syemape.radio.ui.screens.MapScreen
 import com.syemape.radio.ui.screens.ProfileScreen
@@ -296,6 +297,7 @@ private fun AppRoot(onDarkModeChanged: (Boolean) -> Unit) {
                         onOpenChat = { id, name -> openChat = id to name },
                         onOpenChannelChat = { id, name -> openChannelChat = id to name },
                     )
+                    Tab.Llamadas -> CallsScreen(topInset, bottomInset)
                     Tab.Alertas -> AlertsScreen(topInset, onGoMap = { tab = Tab.Mapa }, onGoRadio = { tab = Tab.Radio })
                     Tab.Perfil -> ProfileScreen(
                         topInset,
