@@ -66,6 +66,7 @@ object RadioManager {
     var privateCall by mutableStateOf<PrivateRadioCallState?>(null); private set
     var privateCallHistory by mutableStateOf<List<PrivateCallHistoryEntry>>(emptyList()); private set
     var hasUnreadPrivateCalls by mutableStateOf(false); private set
+    var privateCallUnreadCount by mutableIntStateOf(0); private set
     var openPrivateRadioRequest by mutableStateOf<String?>(null); private set
 
     private val ui = CoroutineScope(SupervisorJob() + Dispatchers.Main)
@@ -173,7 +174,8 @@ object RadioManager {
         appRef = app
         sysAudio = app.getSystemService(Context.AUDIO_SERVICE) as AudioManager
         loadPrivateCallHistory()
-        hasUnreadPrivateCalls = Prefs.hasUnreadPrivateCalls
+        privateCallUnreadCount = Prefs.privateCallUnreadCount
+        hasUnreadPrivateCalls = privateCallUnreadCount > 0
         registerConnectivity(app) // estado de internet para el indicador de señal
         // Listeners + conexión del socket
         radioConnectListener?.let { socket.off("connect", it) }
@@ -192,9 +194,12 @@ object RadioManager {
             if (id.isBlank() || convo.isBlank() || peerId.isBlank()) return@Listener
             ui.launch {
                 privateCall = PrivateRadioCallState(id, convo, peerId, name, "INCOMING", false)
-                addIncomingCallToHistory(id, peerId, name)
-                hasUnreadPrivateCalls = true
-                Prefs.hasUnreadPrivateCalls = true
+                if (addIncomingCallToHistory(id, convo, peerId, name)) {
+                    privateCallUnreadCount += 1
+                    Prefs.privateCallUnreadCount = privateCallUnreadCount
+                    hasUnreadPrivateCalls = true
+                    Prefs.hasUnreadPrivateCalls = true
+                }
                 Notifier.notifyPrivateCall(id, name)
             }
         })
@@ -719,21 +724,24 @@ object RadioManager {
                     peerId = row.optString("peerId"),
                     peerName = row.optString("peerName", "Usuario"),
                     timestamp = row.optLong("timestamp"),
+                    conversationId = row.optString("conversationId"),
                     outcome = row.optString("outcome", "RECIBIDA"),
                 )
             }
         }.getOrDefault(emptyList())
     }
 
-    private fun addIncomingCallToHistory(callId: String, peerId: String, peerName: String) {
-        if (privateCallHistory.any { it.callId == callId }) return
+    private fun addIncomingCallToHistory(callId: String, conversationId: String, peerId: String, peerName: String): Boolean {
+        if (privateCallHistory.any { it.callId == callId }) return false
         privateCallHistory = (listOf(PrivateCallHistoryEntry(
             callId = callId,
             peerId = peerId,
             peerName = peerName.ifBlank { "Usuario" },
             timestamp = System.currentTimeMillis(),
+            conversationId = conversationId,
         )) + privateCallHistory).take(100)
         persistPrivateCallHistory()
+        return true
     }
 
     private fun updatePrivateCallHistory(callId: String, outcome: String) {
@@ -751,12 +759,15 @@ object RadioManager {
                     .put("peerId", entry.peerId)
                     .put("peerName", entry.peerName)
                     .put("timestamp", entry.timestamp)
+                    .put("conversationId", entry.conversationId)
                     .put("outcome", entry.outcome))
             }
         }.toString()
     }
 
     fun markPrivateCallsRead() {
+        privateCallUnreadCount = 0
+        Prefs.privateCallUnreadCount = 0
         hasUnreadPrivateCalls = false
         Prefs.hasUnreadPrivateCalls = false
     }

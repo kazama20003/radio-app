@@ -90,6 +90,7 @@ data class PrivateCallHistoryEntry(
     val peerId: String,
     val peerName: String,
     val timestamp: Long,
+    val conversationId: String = "",
     val outcome: String = "RECIBIDA",
 )
 

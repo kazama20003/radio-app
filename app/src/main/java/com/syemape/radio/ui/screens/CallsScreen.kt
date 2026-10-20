@@ -2,6 +2,7 @@ package com.syemape.radio.ui.screens
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -36,7 +37,11 @@ import java.util.Date
 import java.util.Locale
 
 @Composable
-fun CallsScreen(topPadding: Dp, bottomPadding: Dp = 0.dp) {
+fun CallsScreen(
+    topPadding: Dp,
+    bottomPadding: Dp = 0.dp,
+    onCall: (call: com.syemape.radio.data.PrivateCallHistoryEntry) -> Unit = {},
+) {
     LaunchedEffect(RadioManager.privateCallHistory.firstOrNull()?.callId) {
         RadioManager.markPrivateCallsRead()
     }
@@ -72,6 +77,7 @@ fun CallsScreen(topPadding: Dp, bottomPadding: Dp = 0.dp) {
                     Row(
                         Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp))
                             .background(MapeColors.Card)
+                            .clickable { onCall(entry) }
                             .border(1.dp, MapeColors.Border, RoundedCornerShape(16.dp))
                             .padding(horizontal = 14.dp, vertical = 13.dp),
                         verticalAlignment = Alignment.CenterVertically,
@@ -94,6 +100,7 @@ fun CallsScreen(topPadding: Dp, bottomPadding: Dp = 0.dp) {
                                 fontSize = 12.sp,
                             )
                         }
+                        Icon(MapeIcons.Phone, "Volver a llamar a ${entry.peerName}", tint = MapeColors.Red, modifier = Modifier.size(20.dp))
                     }
                 }
             }

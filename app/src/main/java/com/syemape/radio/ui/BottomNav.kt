@@ -53,9 +53,12 @@ fun BottomNav(active: Tab, modifier: Modifier = Modifier, onSelect: (Tab) -> Uni
     ) {
         Tab.entries.forEach { tab ->
             val isActive = tab == active
-            val badge = if (tab == Tab.Chats) com.syemape.radio.data.AppBadges.unreadChats else 0
-            val dot = (tab == Tab.Alertas && com.syemape.radio.data.AppBadges.pendingAlerts > 0) ||
-                (tab == Tab.Llamadas && RadioManager.hasUnreadPrivateCalls)
+            val badge = when (tab) {
+                Tab.Chats -> com.syemape.radio.data.AppBadges.unreadChats
+                Tab.Llamadas -> RadioManager.privateCallUnreadCount
+                else -> 0
+            }
+            val dot = tab == Tab.Alertas && com.syemape.radio.data.AppBadges.pendingAlerts > 0
             Box(
                 modifier = (if (isActive) Modifier.weight(1f) else Modifier.width(if (Tab.entries.size > 5) 40.dp else 48.dp))
                     .fillMaxHeight()

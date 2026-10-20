@@ -297,7 +297,31 @@ private fun AppRoot(onDarkModeChanged: (Boolean) -> Unit) {
                         onOpenChat = { id, name -> openChat = id to name },
                         onOpenChannelChat = { id, name -> openChannelChat = id to name },
                     )
-                    Tab.Llamadas -> CallsScreen(topInset, bottomInset)
+                    Tab.Llamadas -> CallsScreen(topInset, bottomInset) { entry ->
+                        if (entry.peerId.isNotBlank()) scope.launch {
+                            runCatching {
+                                val conversationId = entry.conversationId.ifBlank {
+                                    Backend.api.createConversation(
+                                        com.syemape.radio.data.CreateConversationRequest(
+                                            type = "DIRECT",
+                                            memberIds = listOf(entry.peerId),
+                                        ),
+                                    ).id
+                                }
+                                com.syemape.radio.data.RadioManager.startPrivateCall(
+                                    conversationId,
+                                    entry.peerId,
+                                    entry.peerName,
+                                )
+                            }.onFailure {
+                                android.widget.Toast.makeText(
+                                    context,
+                                    "No se pudo volver a llamar a ${entry.peerName}",
+                                    android.widget.Toast.LENGTH_SHORT,
+                                ).show()
+                            }
+                        }
+                    }
                     Tab.Alertas -> AlertsScreen(topInset, onGoMap = { tab = Tab.Mapa }, onGoRadio = { tab = Tab.Radio })
                     Tab.Perfil -> ProfileScreen(
                         topInset,
