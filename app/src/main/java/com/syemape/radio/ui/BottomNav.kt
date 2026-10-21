@@ -21,6 +21,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
@@ -106,16 +107,18 @@ fun BottomNav(active: Tab, modifier: Modifier = Modifier, onSelect: (Tab) -> Uni
                     }
                 }
                 if (!isActive && badge > 0) {
+                    val badgeColor = Color(0xFFD71920)
                     Box(
                         Modifier
                             .align(Alignment.TopEnd)
-                            .padding(top = 6.dp, end = 2.dp)
-                            .size(18.dp)
+                            .padding(top = 4.dp, end = 1.dp)
+                            .size(if (badge > 9) 23.dp else 21.dp)
+                            .shadow(4.dp, CircleShape)
                             .clip(CircleShape)
-                            .background(MapeColors.Red)
+                            .background(badgeColor)
                             .border(2.dp, MapeColors.Ink, CircleShape),
                         contentAlignment = Alignment.Center,
-                    ) { Text(if (badge > 99) "99" else "$badge", color = MapeColors.White, fontFamily = Outfit, fontWeight = FontWeight.Bold, fontSize = 11.sp) }
+                    ) { Text(if (badge > 99) "99+" else "$badge", color = Color.White, fontFamily = Outfit, fontWeight = FontWeight.ExtraBold, fontSize = if (badge > 99) 8.sp else 11.sp, lineHeight = 11.sp) }
                 }
                 if (!isActive && dot) {
                     Box(
