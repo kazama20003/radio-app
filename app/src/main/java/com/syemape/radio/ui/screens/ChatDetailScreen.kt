@@ -49,6 +49,7 @@ import com.syemape.radio.data.MediaUploader
 import com.syemape.radio.data.PickedFile
 import com.syemape.radio.data.SessionManager
 import com.syemape.radio.ui.MapeIcons
+import com.syemape.radio.ui.MessageLinkText
 import com.syemape.radio.ui.pressScale
 import com.syemape.radio.ui.theme.MapeColors
 import com.syemape.radio.ui.theme.Outfit
@@ -194,7 +195,11 @@ fun ChatDetailScreen(
                                 }
                                 Text("Nota de voz · ${m.durationSec ?: 0}s", color = if (mine) MapeColors.White else MapeColors.Text, fontFamily = Outfit, fontSize = 14.sp)
                             } else {
-                                Text(Fmt.preview(m).ifBlank { m.body ?: "" }, color = if (mine) MapeColors.White else MapeColors.Text, fontFamily = Outfit, fontSize = 15.sp)
+                                MessageLinkText(
+                                    text = Fmt.preview(m).ifBlank { m.body ?: "" },
+                                    color = if (mine) MapeColors.White else MapeColors.Text,
+                                    linkColor = if (MapeColors.darkMode || mine) Color(0xFF90CAF9) else Color(0xFF1565C0),
+                                )
                             }
                         }
                         Text(

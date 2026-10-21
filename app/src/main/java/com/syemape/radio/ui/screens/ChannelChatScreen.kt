@@ -71,6 +71,7 @@ import com.syemape.radio.data.RadioTransmission
 import com.syemape.radio.data.Realtime
 import com.syemape.radio.data.SessionManager
 import com.syemape.radio.ui.MapeIcons
+import com.syemape.radio.ui.MessageLinkText
 import com.syemape.radio.ui.pressScale
 import com.syemape.radio.ui.theme.MapeColors
 import com.syemape.radio.ui.theme.Outfit
@@ -531,7 +532,11 @@ fun ChannelChatScreen(channelId: String, title: String, topPadding: Dp, bottomPa
                             t.imageKey != null -> ImageBubble(urlOf(t.imageKey)) { urlOf(t.imageKey)?.let { fullscreenImage = it } }
                             t.videoKey != null -> MediaCard(MapeIcons.Video, "Video", t.fileName ?: "Toca para reproducir", t.fileSize, mine) { openExternally(t.videoKey) }
                             t.fileKey != null -> MediaCard(MapeIcons.FileDoc, t.fileName ?: "Archivo", "Toca para abrir", t.fileSize, mine) { openExternally(t.fileKey) }
-                            else -> Text(t.preview(), color = if (mine) MapeColors.White else MapeColors.Text, fontFamily = Outfit, fontSize = 15.sp)
+                            else -> MessageLinkText(
+                                text = t.preview(),
+                                color = if (mine) MapeColors.White else MapeColors.Text,
+                                linkColor = if (MapeColors.darkMode || mine) Color(0xFF90CAF9) else Color(0xFF1565C0),
+                            )
                         }
                         Text(Fmt.clockTime(t.createdAt), color = if (mine) MapeColors.TextOnDark else MapeColors.TextFaint, fontFamily = Outfit, fontSize = 10.sp, modifier = Modifier.padding(top = 3.dp).align(Alignment.End))
                     }
