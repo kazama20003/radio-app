@@ -674,15 +674,10 @@ private fun MapPreview(
                             clustered = shouldCluster && group.size > 1,
                         )
                     } else {
-                        val radiusPx = (48f + (group.size.coerceAtMost(8) * 3f)) * density
-                        val pins = group.mapIndexed { index, person ->
-                            val angle = (2.0 * Math.PI * index / group.size) - Math.PI / 2.0
-                            val x = centerX + (kotlin.math.cos(angle) * radiusPx).toInt()
-                            val y = centerY + (kotlin.math.sin(angle) * radiusPx).toInt()
-                            val display = runCatching {
-                                projection.fromScreenLocation(android.graphics.Point(x, y))
-                            }.getOrDefault(LatLng(person.lastLat!!, person.lastLng!!))
-                            OperatorMapPin(person, display)
+                        // El extremo de cada gota representa la coordenada GPS real.
+                        // No desplazamos los marcadores al acercar el zoom.
+                        val pins = group.map { person ->
+                            OperatorMapPin(person, LatLng(person.lastLat!!, person.lastLng!!))
                         }
                         OperatorMapGroup(group, center, pins, clustered = false)
                     }
@@ -850,34 +845,16 @@ private fun OperatorClusterMarker(people: List<LivePerson>, photos: Map<String, 
 @Composable
 private fun OperatorMarker(p: LivePerson, selected: Boolean, isMe: Boolean, photo: ImageBitmap?) {
     val ring = when {
-        selected -> MapeColors.Red
-        isMe -> MapeColors.Blue
+        selected -> Color(0xFFD71920)
+        isMe -> Color(0xFF1677D2)
         else -> Color(0xFF2E9E5B)
     }
     val label = p.nickname?.takeIf { it.isNotBlank() }
         ?: p.name?.trim()?.split(" ")?.firstOrNull()?.replaceFirstChar { it.uppercase() }
         ?: "Operador"
-    val ringSize = if (selected) 54.dp else 48.dp
-    val avatarSize = if (selected) 46.dp else 40.dp
+    val pinWidth = if (selected) 54.dp else 48.dp
+    val avatarSize = if (selected) 44.dp else 40.dp
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Box(
-            Modifier.size(ringSize).clip(CircleShape).background(ring),
-            contentAlignment = Alignment.Center,
-        ) {
-            Box(Modifier.size(avatarSize), contentAlignment = Alignment.Center) {
-                Avatar(initialsOf(p.name ?: p.nickname ?: "?"), avatarColor(p.id), size = avatarSize, border = 2.dp, borderColor = MapeColors.White)
-                if (photo != null) Image(
-                    bitmap = photo, contentDescription = "Foto de $label",
-                    modifier = Modifier.size(avatarSize - 3.dp).clip(CircleShape), contentScale = ContentScale.Crop,
-                )
-            }
-            // Estas personas llegan de la lista de presencia/ubicaciones en vivo.
-            Box(
-                Modifier.align(Alignment.BottomEnd).size(10.dp).clip(CircleShape)
-                    .background(Color(0xFF22C55E)).border(1.5.dp, MapeColors.White, CircleShape),
-            )
-        }
-        Spacer(Modifier.height(3.dp))
         Text(
             text = label,
             color = MapeColors.White,
@@ -887,8 +864,48 @@ private fun OperatorMarker(p: LivePerson, selected: Boolean, isMe: Boolean, phot
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.widthIn(max = 132.dp).clip(RoundedCornerShape(8.dp))
-                .background(if (selected) MapeColors.Red else MapeColors.Ink)
+                .background(if (selected) Color(0xFFD71920) else MapeColors.Ink)
                 .padding(horizontal = 7.dp, vertical = 3.dp),
         )
+        Spacer(Modifier.height(4.dp))
+        Box(Modifier.size(pinWidth, pinWidth + 10.dp), contentAlignment = Alignment.TopCenter) {
+            androidx.compose.foundation.Canvas(Modifier.fillMaxSize()) {
+                val w = size.width
+                val h = size.height
+                val pin = androidx.compose.ui.graphics.Path().apply {
+                    moveTo(w * 0.5f, h)
+                    cubicTo(w * 0.43f, h * 0.77f, w * 0.04f, h * 0.49f, w * 0.04f, h * 0.34f)
+                    cubicTo(w * 0.04f, h * 0.14f, w * 0.24f, 0f, w * 0.5f, 0f)
+                    cubicTo(w * 0.76f, 0f, w * 0.96f, h * 0.14f, w * 0.96f, h * 0.34f)
+                    cubicTo(w * 0.96f, h * 0.49f, w * 0.57f, h * 0.77f, w * 0.5f, h)
+                    close()
+                }
+                drawPath(pin, ring)
+            }
+            Box(
+                Modifier.align(Alignment.TopCenter).padding(top = 3.dp).size(avatarSize)
+                    .clip(CircleShape).background(MapeColors.White).padding(2.dp)
+                    .clip(CircleShape).background(avatarColor(p.id)),
+                contentAlignment = Alignment.Center,
+            ) {
+                if (photo != null) {
+                    Image(
+                        bitmap = photo,
+                        contentDescription = "Foto de $label",
+                        modifier = Modifier.fillMaxSize().clip(CircleShape),
+                        contentScale = ContentScale.Crop,
+                    )
+                } else {
+                    Text(initialsOf(p.name ?: p.nickname ?: "?"), color = MapeColors.White,
+                        fontFamily = Outfit, fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                }
+            }
+            // Los operadores del mapa en vivo están conectados.
+            Box(
+                Modifier.align(Alignment.TopEnd).padding(top = 31.dp, end = 3.dp).size(10.dp)
+                    .clip(CircleShape).background(Color(0xFF22C55E))
+                    .border(1.5.dp, MapeColors.White, CircleShape),
+            )
+        }
     }
 }

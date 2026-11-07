@@ -181,6 +181,7 @@ object RadioManager {
         radioConnectListener?.let { socket.off("connect", it) }
         radioDisconnectListener?.let { socket.off("disconnect", it) }
         socket.off("ms:newProducer"); socket.off("ms:producerClosed"); socket.off("channel:presence")
+        socket.off("channel:emergency")
         socket.off("channel:important-changed")
         socket.off("private-radio:incoming")
         socket.off("private-radio:accepted")
@@ -244,6 +245,15 @@ object RadioManager {
                 Notifier.cancelPrivateCall(current.callId)
                 privateCall = current.copy(phase = o.optString("reason", "ENDED").uppercase(), reason = o.optString("reason"))
             }
+        })
+        socket.on("channel:emergency", Emitter.Listener { args ->
+            val event = args.firstOrNull() as? JSONObject ?: return@Listener
+            val eventId = event.optString("id")
+            val senderId = event.optString("senderId")
+            if (eventId.isBlank() || senderId == SessionManager.user?.id) return@Listener
+            val senderName = event.optString("senderName", "Usuario").ifBlank { "Usuario" }
+            val channelName = event.optString("channelName", "canal de radio").ifBlank { "canal de radio" }
+            ui.launch { Notifier.notifyEmergency(eventId, senderName, channelName) }
         })
         socket.on("channel:presence", Emitter.Listener { args ->
             val o = args.firstOrNull() as? JSONObject ?: return@Listener

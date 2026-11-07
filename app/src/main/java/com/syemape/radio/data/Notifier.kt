@@ -8,6 +8,9 @@ import android.content.Intent
 import android.media.AudioAttributes
 import android.media.RingtoneManager
 import android.os.Build
+import android.os.VibrationEffect
+import android.os.Vibrator
+import android.os.VibratorManager
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import com.syemape.radio.R
@@ -29,6 +32,8 @@ object Notifier {
     // Nuevo ID porque Android no deja modificar sonido/vibración de canales existentes.
     private const val CH_PRIVATE_CALL = "mape_private_calls_v3"
     private const val CH_PRIVATE_ACTIVE = "mape_private_active_v2"
+    private const val CH_EMERGENCY = "mape_radio_emergency_v1"
+    private val EMERGENCY_VIBRATION = longArrayOf(0, 220, 100, 650, 140, 220, 100, 650)
     private val RED = 0xFFE5322D.toInt()
 
     private var appContext: Context? = null
@@ -63,6 +68,16 @@ object Notifier {
                 description = "Controles silenciosos de una transmisión privada activa"
                 setSound(null, null)
                 enableVibration(false)
+            })
+        }
+        if (nm.getNotificationChannel(CH_EMERGENCY) == null) {
+            nm.createNotificationChannel(NotificationChannel(CH_EMERGENCY, "Emergencias de radio", NotificationManager.IMPORTANCE_HIGH).apply {
+                description = "Vibración urgente cuando una persona envía una emergencia por radio"
+                setSound(null, null)
+                enableVibration(true)
+                vibrationPattern = EMERGENCY_VIBRATION
+                enableLights(true)
+                lightColor = RED
             })
         }
 
@@ -182,6 +197,49 @@ object Notifier {
     }
 
     private fun activePrivateCallId(callId: String) = callId.hashCode() xor 0x4D415045
+
+    /** Notificación urgente, sin sonido para no interrumpir la voz de radio. */
+    fun notifyEmergency(id: String, senderName: String, channelName: String) {
+        val ctx = appContext ?: return
+        if (!NotificationManagerCompat.from(ctx).areNotificationsEnabled()) {
+            vibrateEmergency()
+            return
+        }
+        val body = "Solicita apoyo en $channelName"
+        val notification = NotificationCompat.Builder(ctx, CH_EMERGENCY)
+            .setSmallIcon(R.drawable.ic_stat_alert)
+            .setColor(RED)
+            .setContentTitle("🚨 EMERGENCIA · $senderName")
+            .setContentText(body)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(body))
+            .setCategory(NotificationCompat.CATEGORY_ALARM)
+            .setPriority(NotificationCompat.PRIORITY_MAX)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            .setAutoCancel(true)
+            .setContentIntent(openAppIntent())
+            .build()
+        runCatching { NotificationManagerCompat.from(ctx).notify(id.hashCode(), notification) }
+    }
+
+    /** Confirmación háptica local para quien pulsa el botón de emergencia. */
+    fun vibrateEmergency() {
+        val ctx = appContext ?: return
+        runCatching {
+            val vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                ctx.getSystemService(VibratorManager::class.java)?.defaultVibrator
+            } else {
+                @Suppress("DEPRECATION")
+                ctx.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
+            } ?: return
+            if (!vibrator.hasVibrator()) return
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                vibrator.vibrate(VibrationEffect.createWaveform(EMERGENCY_VIBRATION, -1))
+            } else {
+                @Suppress("DEPRECATION")
+                vibrator.vibrate(EMERGENCY_VIBRATION, -1)
+            }
+        }
+    }
 
     /** Lanza (o actualiza) la notificación de una alerta recibida en vivo. */
     fun notifyAlert(a: Alert) {
