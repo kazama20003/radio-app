@@ -7,7 +7,10 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.media.AudioAttributes
+import android.media.MediaPlayer
 import android.media.RingtoneManager
+import android.os.Handler
+import android.os.Looper
 import android.os.Build
 import android.os.VibrationEffect
 import android.os.Vibrator
@@ -33,10 +36,18 @@ object Notifier {
     // Nuevo ID porque Android no deja modificar sonido/vibración de canales existentes.
     private const val CH_PRIVATE_CALL = "mape_private_calls_v3"
     private const val CH_PRIVATE_ACTIVE = "mape_private_active_v2"
-    // v2 reemplaza el canal silencioso anterior: Android conserva el sonido de cada canal.
-    private const val CH_EMERGENCY = "mape_radio_emergency_v2"
+    // v3 deja el canal sin tono. La sirena se reproduce aparte, sin pedir foco de audio.
+    private const val CH_EMERGENCY = "mape_radio_emergency_v3"
     private val EMERGENCY_VIBRATION = longArrayOf(0, 220, 100, 650, 140, 220, 100, 650)
     private val RED = 0xFFE5322D.toInt()
+    private val mainHandler = Handler(Looper.getMainLooper())
+    private val emergencyAudioAttributes = AudioAttributes.Builder()
+        .setUsage(AudioAttributes.USAGE_ALARM)
+        .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+        .build()
+    @Volatile private var emergencyCallTonePlayer: MediaPlayer? = null
+    @Volatile private var emergencySirenPlayer: MediaPlayer? = null
+    @Volatile private var emergencySoundGeneration = 0
 
     private var appContext: Context? = null
 
@@ -74,13 +85,8 @@ object Notifier {
         }
         if (nm.getNotificationChannel(CH_EMERGENCY) == null) {
             nm.createNotificationChannel(NotificationChannel(CH_EMERGENCY, "Emergencias de radio", NotificationManager.IMPORTANCE_HIGH).apply {
-                description = "Sirena y vibración urgente cuando una persona envía una emergencia por radio"
-                val siren = Uri.parse("android.resource://${appContext?.packageName}/${R.raw.emergency_siren}")
-                val alarmAttributes = AudioAttributes.Builder()
-                    .setUsage(AudioAttributes.USAGE_ALARM)
-                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                    .build()
-                setSound(siren, alarmAttributes)
+                description = "Vibración urgente; la sirena se controla con la alerta"
+                setSound(null, null)
                 enableVibration(true)
                 vibrationPattern = EMERGENCY_VIBRATION
                 enableLights(true)
@@ -205,9 +211,122 @@ object Notifier {
 
     private fun activePrivateCallId(callId: String) = callId.hashCode() xor 0x4D415045
 
-    /** Notificación urgente, sin sonido para no interrumpir la voz de radio. */
+    private fun emergencyActionIntent(id: String, action: String): PendingIntent {
+        val ctx = appContext ?: error("Notifier no está inicializado")
+        val intent = Intent(ctx, EmergencyAlarmReceiver::class.java)
+            .setAction(action)
+            .putExtra(EmergencyAlarmReceiver.EXTRA_ALERT_ID, id)
+        return PendingIntent.getBroadcast(
+            ctx,
+            (id + action).hashCode(),
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+    }
+
+    /** Timbre de radio una vez y sirena repetida. No solicita foco ni cambia el volumen de la radio. */
+    private fun startEmergencyAlarm() {
+        val ctx = appContext ?: return
+        val generation = ++emergencySoundGeneration
+        mainHandler.post {
+            releaseEmergencyPlayers()
+            val callTone = createEmergencyCallTone(ctx)
+            if (callTone == null) {
+                startSirenLoop(ctx, generation)
+                return@post
+            }
+            emergencyCallTonePlayer = callTone
+            runCatching {
+                callTone.isLooping = false
+                callTone.setOnPreparedListener { prepared ->
+                    if (generation == emergencySoundGeneration) prepared.start() else prepared.release()
+                }
+                callTone.setOnCompletionListener { completed ->
+                    runCatching { completed.release() }
+                    if (emergencyCallTonePlayer === completed) emergencyCallTonePlayer = null
+                    startSirenLoop(ctx, generation)
+                }
+                callTone.setOnErrorListener { failed, _, _ ->
+                    runCatching { failed.release() }
+                    if (emergencyCallTonePlayer === failed) emergencyCallTonePlayer = null
+                    startSirenLoop(ctx, generation)
+                    true
+                }
+                callTone.prepareAsync()
+            }.onFailure {
+                runCatching { callTone.release() }
+                emergencyCallTonePlayer = null
+                startSirenLoop(ctx, generation)
+            }
+        }
+    }
+
+    private fun startSirenLoop(ctx: Context, generation: Int) {
+        if (generation != emergencySoundGeneration) return
+        val siren = createEmergencyPlayer(ctx, R.raw.emergency_siren) ?: return
+        emergencySirenPlayer = siren
+        runCatching {
+            siren.isLooping = true
+            siren.setOnPreparedListener { prepared ->
+                if (generation == emergencySoundGeneration) prepared.start() else prepared.release()
+            }
+            siren.prepareAsync()
+        }.onFailure {
+            runCatching { siren.release() }
+            if (emergencySirenPlayer === siren) emergencySirenPlayer = null
+        }
+    }
+
+    private fun createEmergencyPlayer(ctx: Context, resourceId: Int): MediaPlayer? = runCatching {
+        MediaPlayer().apply {
+            setAudioAttributes(emergencyAudioAttributes)
+            setVolume(1f, 1f)
+            ctx.resources.openRawResourceFd(resourceId).use { descriptor ->
+                setDataSource(descriptor.fileDescriptor, descriptor.startOffset, descriptor.length)
+            }
+        }
+    }.getOrNull()
+
+    /** Usa el mismo tono del sistema que las llamadas privadas; el WAV local es respaldo. */
+    private fun createEmergencyCallTone(ctx: Context): MediaPlayer? {
+        val callUri = RingtoneManager.getActualDefaultRingtoneUri(ctx, RingtoneManager.TYPE_RINGTONE)
+            ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE)
+        val player = runCatching {
+            MediaPlayer().apply {
+                setAudioAttributes(emergencyAudioAttributes)
+                setVolume(1f, 1f)
+                setDataSource(ctx, callUri)
+            }
+        }.getOrNull()
+        return player ?: createEmergencyPlayer(ctx, R.raw.radio_private_ring)
+    }
+
+    private fun releaseEmergencyPlayers() {
+        emergencyCallTonePlayer?.let { player ->
+            runCatching { player.setOnCompletionListener(null); player.setOnErrorListener(null); player.stop() }
+            runCatching { player.release() }
+        }
+        emergencyCallTonePlayer = null
+        emergencySirenPlayer?.let { player ->
+            runCatching { player.setOnCompletionListener(null); player.stop() }
+            runCatching { player.release() }
+        }
+        emergencySirenPlayer = null
+    }
+
+    /** Detener al confirmar/cerrar la alerta o tocar su notificación. */
+    fun stopEmergency(id: String, context: Context? = appContext) {
+        emergencySoundGeneration++
+        mainHandler.post { releaseEmergencyPlayers() }
+        context?.let { ctx ->
+            runCatching { NotificationManagerCompat.from(ctx).cancel(id.hashCode()) }
+        }
+    }
+
+    /** Tono de llamada una vez, sirena continua y notificación hasta confirmación/cierre. */
     fun notifyEmergency(id: String, senderName: String, channelName: String) {
         val ctx = appContext ?: return
+        startEmergencyAlarm()
         if (!NotificationManagerCompat.from(ctx).areNotificationsEnabled()) {
             vibrateEmergency()
             return
@@ -222,10 +341,25 @@ object Notifier {
             .setCategory(NotificationCompat.CATEGORY_ALARM)
             .setPriority(NotificationCompat.PRIORITY_MAX)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
-            .setAutoCancel(true)
-            .setContentIntent(openAppIntent())
+            .setAutoCancel(false)
+            .setOngoing(false)
+            .setContentIntent(openEmergencyAppIntent(id))
+            .setDeleteIntent(emergencyActionIntent(id, EmergencyAlarmReceiver.ACTION_DISMISS))
+            .addAction(R.drawable.ic_stat_alert, "Confirmar", emergencyActionIntent(id, EmergencyAlarmReceiver.ACTION_CONFIRM))
+            .addAction(R.drawable.ic_stat_alert, "Cerrar", emergencyActionIntent(id, EmergencyAlarmReceiver.ACTION_DISMISS))
             .build()
         runCatching { NotificationManagerCompat.from(ctx).notify(id.hashCode(), notification) }
+    }
+
+    private fun openEmergencyAppIntent(id: String): PendingIntent? {
+        val ctx = appContext ?: return null
+        val open = ctx.packageManager.getLaunchIntentForPackage(ctx.packageName)
+            ?.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+            ?.putExtra(EmergencyAlarmReceiver.EXTRA_ALERT_ID, id)
+        return PendingIntent.getActivity(
+            ctx, ("emergency-open" + id).hashCode(), open,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
     }
 
     /** Confirmación háptica local para quien pulsa el botón de emergencia. */
