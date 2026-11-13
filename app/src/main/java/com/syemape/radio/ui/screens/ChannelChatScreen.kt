@@ -31,12 +31,10 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -152,8 +150,6 @@ fun ChannelChatScreen(channelId: String, title: String, topPadding: Dp, bottomPa
     var uploadProgress by remember { mutableStateOf(0f) }
     var attachMenu by remember { mutableStateOf(false) }
     var fullscreenImage by remember { mutableStateOf<String?>(null) }
-    var showEmergencyConfirm by remember { mutableStateOf(false) }
-    var sendingEmergency by remember { mutableStateOf(false) }
     var cameraOutput by remember { mutableStateOf<Uri?>(null) }
     val liveTalker = when {
         com.syemape.radio.data.RadioManager.talking -> SessionManager.user?.nickname?.takeIf { it.isNotBlank() }
@@ -165,43 +161,6 @@ fun ChannelChatScreen(channelId: String, title: String, topPadding: Dp, bottomPa
         .filter { it.id.isNotBlank() && it.id != meId }
 
     fun toast(msg: String) = android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_SHORT).show()
-
-    fun sendEmergency() {
-        val socket = Realtime.socket("/radio")
-        if (!socket.connected()) {
-            showEmergencyConfirm = false
-            toast("No hay conexión con el canal")
-            return
-        }
-        sendingEmergency = true
-        socket.emit(
-            "channel:emergency",
-            JSONObject().put("channelId", channelId),
-            io.socket.client.Ack { args ->
-                val response = args.firstOrNull()
-                val ok = when (response) {
-                    is JSONObject -> response.optBoolean("ok")
-                    is Map<*, *> -> response["ok"] == true
-                    else -> false
-                }
-                val error = when (response) {
-                    is JSONObject -> response.optString("error")
-                    is Map<*, *> -> response["error"]?.toString()
-                    else -> null
-                }
-                scope.launch(Dispatchers.Main) {
-                    sendingEmergency = false
-                    showEmergencyConfirm = false
-                    if (ok) {
-                        com.syemape.radio.data.Notifier.vibrateEmergency()
-                        toast("Emergencia enviada a ${title}")
-                    } else {
-                        toast(error?.takeIf { it.isNotBlank() } ?: "No se pudo enviar la emergencia")
-                    }
-                }
-            },
-        )
-    }
 
     fun startPrivateRadio(user: com.syemape.radio.data.MiniUser) {
         val label = user.nickname?.takeIf { it.isNotBlank() } ?: user.name ?: "Operador"
@@ -491,23 +450,6 @@ fun ChannelChatScreen(channelId: String, title: String, topPadding: Dp, bottomPa
     }
 
     Column(Modifier.fillMaxSize().background(MapeColors.Bg)) {
-        if (showEmergencyConfirm) {
-            AlertDialog(
-                onDismissRequest = { if (!sendingEmergency) showEmergencyConfirm = false },
-                title = { Text("Enviar emergencia", fontFamily = Outfit, fontWeight = FontWeight.Bold) },
-                text = { Text("Se avisará a las personas del canal ${title} y sus teléfonos vibrarán.", fontFamily = Outfit) },
-                confirmButton = {
-                    TextButton(onClick = { sendEmergency() }, enabled = !sendingEmergency) {
-                        Text(if (sendingEmergency) "Enviando…" else "Enviar", color = Color(0xFFD71920), fontFamily = Outfit, fontWeight = FontWeight.Bold)
-                    }
-                },
-                dismissButton = {
-                    TextButton(onClick = { showEmergencyConfirm = false }, enabled = !sendingEmergency) {
-                        Text("Cancelar", color = MapeColors.TextMuted, fontFamily = Outfit)
-                    }
-                },
-            )
-        }
         Row(
             Modifier.fillMaxWidth().background(MapeColors.Card).padding(top = topPadding).padding(horizontal = 12.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -524,15 +466,6 @@ fun ChannelChatScreen(channelId: String, title: String, topPadding: Dp, bottomPa
                         Icon(MapeIcons.Mic, null, tint = MapeColors.Red, modifier = Modifier.size(13.dp))
                         Text("Al aire · $liveTalker", color = MapeColors.Red, fontFamily = Outfit, fontWeight = FontWeight.SemiBold, fontSize = 11.sp, maxLines = 1)
                     }
-                }
-            }
-            if (!channelId.startsWith("private:")) {
-                Box(
-                    Modifier.size(42.dp).clip(CircleShape).background(Color(0xFFD71920))
-                        .pressScale(enabled = !sendingEmergency) { showEmergencyConfirm = true },
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Icon(MapeIcons.AlertTriangle, "Enviar emergencia", tint = Color.White, modifier = Modifier.size(22.dp))
                 }
             }
         }

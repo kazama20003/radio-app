@@ -35,10 +35,12 @@ import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -75,10 +77,13 @@ import com.syemape.radio.data.CreateRadioChannelRequest
 import com.syemape.radio.data.CreateConversationRequest
 import com.syemape.radio.data.UpdateRadioChannelRequest
 import com.syemape.radio.data.SessionManager
+import com.syemape.radio.data.Realtime
 import com.syemape.radio.ui.MapeIcons
 import com.syemape.radio.ui.pressScale
 import com.syemape.radio.ui.theme.Outfit
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
+import org.json.JSONObject
 
 private object RadioColors {
     val Bg = Color(0xFF090909)
@@ -280,7 +285,11 @@ fun RadioScreen(
                 // Phones with a short display get a smaller PTT target instead of
                 // pushing the microphone below the bottom navigation bar.
                 val micSize = minOf(maxWidth, maxHeight, 300.dp)
-                if (micSize > 0.dp) RadioPushToTalkButton(size = micSize)
+                if (micSize > 0.dp) RadioPushToTalkButton(
+                    size = micSize,
+                    emergencyChannelId = RadioManager.channelId,
+                    emergencyChannelName = RadioManager.channelName,
+                )
             }
         }
     }
@@ -627,7 +636,7 @@ private fun RadioSpeakerStatus(
 }
 
 @Composable
-fun RadioPushToTalkButton(size: Dp) {
+fun RadioPushToTalkButton(size: Dp, emergencyChannelId: String? = null, emergencyChannelName: String = "canal") {
     val talking = RadioManager.talking
     val ready = RadioManager.connected // true solo cuando el canal de audio está listo
     val brandRed = Color(0xFFD71920)
@@ -683,6 +692,84 @@ fun RadioPushToTalkButton(size: Dp) {
                 color = if (talking) Color.White else brandRed, fontFamily = Outfit, fontWeight = FontWeight.Bold, fontSize = (buttonSize.value * 0.105f).coerceAtMost(18f).sp, letterSpacing = 1.2.sp,
             )
         }
+        if (!emergencyChannelId.isNullOrBlank()) {
+            RadioEmergencyButton(
+                channelId = emergencyChannelId,
+                channelName = emergencyChannelName,
+                modifier = Modifier.align(Alignment.TopCenter).offset(y = (-18).dp),
+            )
+        }
+    }
+}
+
+@Composable
+private fun RadioEmergencyButton(channelId: String, channelName: String, modifier: Modifier = Modifier) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var showConfirm by remember { mutableStateOf(false) }
+    var sending by remember { mutableStateOf(false) }
+
+    if (showConfirm) {
+        AlertDialog(
+            onDismissRequest = { if (!sending) showConfirm = false },
+            title = { Text("Enviar emergencia", fontFamily = Outfit, fontWeight = FontWeight.Bold) },
+            text = { Text("Se enviará una alerta sonora a quienes están conectados a $channelName.", fontFamily = Outfit) },
+            confirmButton = {
+                TextButton(onClick = {
+                    val socket = Realtime.socket("/radio")
+                    if (!socket.connected()) {
+                        showConfirm = false
+                        android.widget.Toast.makeText(context, "No hay conexión con el canal", android.widget.Toast.LENGTH_SHORT).show()
+                    } else {
+                        sending = true
+                        socket.emit("channel:emergency", JSONObject().put("channelId", channelId), io.socket.client.Ack { args ->
+                            val response = args.firstOrNull()
+                            val ok = when (response) {
+                                is JSONObject -> response.optBoolean("ok")
+                                is Map<*, *> -> response["ok"] == true
+                                else -> false
+                            }
+                            val error = when (response) {
+                                is JSONObject -> response.optString("error")
+                                is Map<*, *> -> response["error"]?.toString()
+                                else -> null
+                            }
+                            scope.launch(Dispatchers.Main) {
+                                sending = false
+                                showConfirm = false
+                                if (ok) {
+                                    com.syemape.radio.data.Notifier.vibrateEmergency()
+                                    android.widget.Toast.makeText(context, "Alerta de emergencia enviada", android.widget.Toast.LENGTH_SHORT).show()
+                                } else {
+                                    android.widget.Toast.makeText(context, error?.takeIf { it.isNotBlank() } ?: "No se pudo enviar la emergencia", android.widget.Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                        })
+                    }
+                }, enabled = !sending) {
+                    Text(if (sending) "Enviando…" else "Enviar alerta", color = Color(0xFFD71920), fontFamily = Outfit, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showConfirm = false }, enabled = !sending) {
+                    Text("Cancelar", color = RadioColors.TextMuted, fontFamily = Outfit)
+                }
+            },
+        )
+    }
+
+    Row(
+        modifier = modifier
+            .clip(CircleShape)
+            .background(Color(0xFFD71920))
+            .border(1.dp, Color.White.copy(alpha = 0.85f), CircleShape)
+            .clickable(enabled = !sending) { showConfirm = true }
+            .padding(horizontal = 13.dp, vertical = 9.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Icon(MapeIcons.AlertTriangle, contentDescription = null, tint = Color.White, modifier = Modifier.size(18.dp))
+        Text("SOS", color = Color.White, fontFamily = Outfit, fontWeight = FontWeight.Bold, fontSize = 12.sp, letterSpacing = 0.6.sp)
     }
 }
 

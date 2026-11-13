@@ -5,6 +5,7 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
 import android.media.AudioAttributes
 import android.media.RingtoneManager
 import android.os.Build
@@ -32,7 +33,8 @@ object Notifier {
     // Nuevo ID porque Android no deja modificar sonido/vibración de canales existentes.
     private const val CH_PRIVATE_CALL = "mape_private_calls_v3"
     private const val CH_PRIVATE_ACTIVE = "mape_private_active_v2"
-    private const val CH_EMERGENCY = "mape_radio_emergency_v1"
+    // v2 reemplaza el canal silencioso anterior: Android conserva el sonido de cada canal.
+    private const val CH_EMERGENCY = "mape_radio_emergency_v2"
     private val EMERGENCY_VIBRATION = longArrayOf(0, 220, 100, 650, 140, 220, 100, 650)
     private val RED = 0xFFE5322D.toInt()
 
@@ -72,8 +74,13 @@ object Notifier {
         }
         if (nm.getNotificationChannel(CH_EMERGENCY) == null) {
             nm.createNotificationChannel(NotificationChannel(CH_EMERGENCY, "Emergencias de radio", NotificationManager.IMPORTANCE_HIGH).apply {
-                description = "Vibración urgente cuando una persona envía una emergencia por radio"
-                setSound(null, null)
+                description = "Sirena y vibración urgente cuando una persona envía una emergencia por radio"
+                val siren = Uri.parse("android.resource://${appContext?.packageName}/${R.raw.emergency_siren}")
+                val alarmAttributes = AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_ALARM)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                    .build()
+                setSound(siren, alarmAttributes)
                 enableVibration(true)
                 vibrationPattern = EMERGENCY_VIBRATION
                 enableLights(true)
