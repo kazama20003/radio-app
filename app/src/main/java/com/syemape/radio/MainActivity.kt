@@ -57,7 +57,6 @@ class MainActivity : ComponentActivity() {
         com.syemape.radio.data.Notifier.init(applicationContext)
         SessionManager.bootstrap()
         handlePrivateCallIntent(intent)
-        handleEmergencyIntent(intent)
         enableEdgeToEdge()
         setContent {
             var darkMode by remember { mutableStateOf(com.syemape.radio.data.Prefs.darkMode) }
@@ -77,6 +76,7 @@ class MainActivity : ComponentActivity() {
      *  suspendió en 2º plano). Seguro aunque la radio no esté activa. */
     override fun onResume() {
         super.onResume()
+        isForeground = true
         runCatching {
             if (com.syemape.radio.data.Backend.tokens.accessToken != null) {
                 com.syemape.radio.data.RadioManager.start(application as android.app.Application)
@@ -86,17 +86,15 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onPause() {
+        isForeground = false
+        super.onPause()
+    }
+
     override fun onNewIntent(intent: android.content.Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
         handlePrivateCallIntent(intent)
-        handleEmergencyIntent(intent)
-    }
-
-    private fun handleEmergencyIntent(intent: android.content.Intent?) {
-        val id = intent?.getStringExtra(com.syemape.radio.data.EmergencyAlarmReceiver.EXTRA_ALERT_ID) ?: return
-        intent.removeExtra(com.syemape.radio.data.EmergencyAlarmReceiver.EXTRA_ALERT_ID)
-        com.syemape.radio.data.Notifier.stopEmergency(id, this)
     }
 
     private fun handlePrivateCallIntent(intent: android.content.Intent?) {
@@ -126,6 +124,11 @@ class MainActivity : ComponentActivity() {
                 delay(500)
             }
         }
+    }
+
+    companion object {
+        @Volatile var isForeground: Boolean = false
+            private set
     }
 }
 
